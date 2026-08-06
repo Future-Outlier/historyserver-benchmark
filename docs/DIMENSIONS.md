@@ -85,11 +85,11 @@ cluster shape.
 
 | Measurement | Source | Why this source |
 |---|---|---|
-| Container memory (`anon`, `memory.current`, lifetime `memory.peak`) | cgroup v2 files read directly on the kind node, 1 s | `anon` is heap without page-cache inflation; `memory.peak` is kernel-recorded and cannot be missed by polling |
+| Container memory (`anon`, `memory.current`, lifetime `memory.peak`) | cgroup v2 files read directly on the kind node, 1 s | `anon` is anonymous memory — larger than the Go heap (1,015 MiB against 816 MB in one 50k run) but free of page-cache inflation; `memory.peak` is kernel-recorded and cannot be missed by polling |
 | Container memory (`working_set`) | kubelet `/stats/summary`, 1 s poll | This is the metric Kubernetes eviction and limits act on — the one that matters for `resources:` |
 | Container CPU | both sources, as deltas of cumulative counters | Deduplicated on the stat's own timestamp; deltas spanning a phase boundary are discarded |
 | Events, bytes, event types, per-node attribution | Full decode of every event file in the bucket after the run | Ground truth, not sampling: `{nodeID}/` path segment attributes traffic to the node that produced it |
-| Storage volume during job vs at shutdown | Bucket snapshots at T0 (before), T1 (after job), T2 (after graceful delete) | The T2−T1 diff is exactly the data that a SIGKILL would have lost |
+| Storage volume during job vs at shutdown | Bucket snapshots at T0 (before), T1 (after job), T2 (after graceful delete) | The T2−T1 diff is the data that had not reached object storage while the job ran; how much of it a given failure loses depends on whether the pod's `emptyDir` survives |
 | Task loss | Distinct `TASK_DEFINITION_EVENT` task IDs scoped to the benchmark job | Counting across all jobs would hide losses behind the submitter's own tasks |
 | Collector backpressure | Followed container logs, including after termination | Uploads mostly happen during drain; a pre-deletion scrape sees none of them |
 | HS cold load | Wall clock on `GET /enter_cluster`; on timeout, re-probe until the warm hit lands | The server keeps loading after the client gives up (singleflight), so the first warm hit upper-bounds the true load time |

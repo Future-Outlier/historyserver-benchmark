@@ -71,7 +71,7 @@ Cold load = `GET /enter_cluster` on a dead session. **The table below ran under
 the sample manifest's 500m CPU limit, which the load saturates** — see
 [FINDINGS.md](FINDINGS.md#2-the-sample-manifest-gives-the-history-server-500m-of-cpu-and-the-cold-load-saturates-it).
 
-| N | cold load | ms/task | peak heap | heap/task | avg cores |
+| N | cold load | ms/task | peak anon | anon/task | avg cores |
 |---:|---:|---:|---:|---:|---:|
 | 1,000 | 2.3 s | 2.28 | 95 MiB | — | 0.42 |
 | 5,000 | 9.8 s | 1.97 | 184 MiB | 38 KiB | 0.46 |
@@ -105,7 +105,7 @@ mirroring Ray's dashboard API), so the task list is always paginated.
 
 ### The same axis at `limits.cpu: 4`
 
-| N | cold load | ms/task | peak heap | avg cores | peak cores |
+| N | cold load | ms/task | peak anon | avg cores | peak cores |
 |---:|---:|---:|---:|---:|---:|
 | 1,000 | 0.69 s | 0.69 | 97 MiB | 0.6 | 1.4 |
 | 5,000 | 3.17 s | 0.63 | 197 MiB | 0.9 | 1.9 |
@@ -115,8 +115,9 @@ mirroring Ray's dashboard API), so the task list is always paginated.
 | 100,000 | 62.67 s | 0.63 | 1,673 MiB | 1.16 | 2.22 |
 
 **0.61–0.72 ms/task, flat across two orders of magnitude.** The 500m column above
-is 1.88–2.28 ms/task up to 50k and then 9.07 ms/task at 100k; the difference is
-the quota, not the data.
+is 1.88–2.28 ms/task up to 20k and 1.51–1.53 ms/task at 50k and 100k once the
+server timeout stops aborting it. Both limits are flat in N; the limit only sets
+the constant.
 
 ### Memory to load one RayCluster session
 
@@ -149,9 +150,10 @@ memory limit  >=  400 MiB + N x 20 KiB
    50k -> 1.4 GiB     100k -> 2.4 GiB     200k -> 4.3 GiB
 ```
 
-That is for **one** session resident. The snapshot cache holds up to
-`--session-cache-size` (default 100) with no TTL, so a server that people
-actually browse can hold many of these at once — see [SIZING.md](SIZING.md).
+That is for **one** session resident, which is all we measured. The snapshot
+cache holds up to `--session-cache-size` (default 100) with no TTL, so a browsed
+server can hold several at once; whether that multiplies the peak cleanly is
+untested — see [SIZING.md](SIZING.md).
 
 > **Why this model ignores every event type except task events.** In the 50k
 > session the bucket held 218,200 task-series events against **14** of
@@ -162,7 +164,10 @@ actually browse can hold many of these at once — see [SIZING.md](SIZING.md).
 > for any workload with more than a few hundred tasks; it would not hold for a
 > cluster that mostly runs actors with very few method calls.
 
-### Is the runtime's automatic tuning already right? Yes.
+### Is the runtime's automatic tuning already right? Probably.
+
+Nothing we tried beat it, but the margins are inside the run-to-run spread, so
+read the table as "no override helped" rather than a ranking.
 
 At a fixed `limits.cpu: 2` and 100k tasks, overriding what Go picks for itself
 only makes things worse:
@@ -255,9 +260,23 @@ heap against 1,015 MiB of anonymous memory.
 | `hscpu4-n50000` | 2,965 tasks/s | 20 s | default | 50,000 / 50,000 |
 | `hscpu4-n100000` | 3,138 tasks/s | 30 s | default | **98,322 / 100,000** |
 
-Loss follows the submission rate: both runs above 3,000 tasks/s are short
-(0.46% and 1.7%), every run at or below 2,965 is complete. Two caveats on these
-counts. The denominator includes the driver's own task definition, so a run
+Across all 43 runs with per-job attribution, loss appears from about 2,885
+tasks/s upward and never below it — but it is not a clean threshold, and an
+earlier version of this report claimed one it should not have:
+
+| Rate | N | Missing | 
+|---:|---:|---:|
+| 2,885 t/s | 200,000 | 12,257 (6.1%) |
+| 2,982 t/s | 200,000 | 16,689 (8.3%) |
+| 2,986 t/s | 100,000 | 1,225 (1.2%) |
+| 2,991 t/s | 100,000 | 476 (0.5%) |
+| 3,098 t/s | 100,000 | 1,733 (1.7%) |
+| 3,138 t/s | 100,000 | 1,678 (1.7%) |
+
+Runs at 2,907, 2,912, 2,965 and 2,978 tasks/s lost nothing, so the boundary
+overlaps rather than separates. Note also that the two **200k** runs lost 6–8%
+where 100k runs at the same rate lost 0.5–1.7%: total volume, or sustained time
+at rate, matters as much as the instantaneous rate. Two further caveats. The denominator includes the driver's own task definition, so a run
 showing exactly `N/N` could still be missing one benchmark task, and a shortfall
 is one larger than it appears. And we cannot rule the collector out on
 backpressure grounds: its 503 path emits no log line, so the counter that reads

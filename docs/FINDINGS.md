@@ -183,7 +183,7 @@ Peak heap was unchanged (1,132 → 1,149 MiB), which is the expected signature o
 a pure CPU/IO cost rather than an allocation one. A one-line change buying 13% is
 worth taking, but it is not the explanation for the 100k knee.
 
-## 5. Defaults imply a ~60,000-task ceiling per session
+## 5. The real ceiling is the session timeout, and crossing it is silent
 
 This is the finding that outlives every CPU tuning number, because crossing it
 does not make the session slow — it makes the session **impossible to open**.
@@ -205,17 +205,56 @@ once the timeout was raised:
 | 100k at `500m` | never returned, in any run | **151.3 s** |
 | 200k at 4 cores | never returned | **119.9 s** |
 
-The 200k case is the sharpest illustration available: it needs 119.9 s against a
-120 s limit, and that ~0.1% overshoot is the difference between a session that
-opens in two minutes and one that can never be opened at all. Nothing in the
-documentation mentions the limit, and nothing warns a user approaching it.
+The 200k case shows how unforgiving the boundary is, though not in the way an
+earlier version of this text claimed. With the flag raised, that session
+completed in **119.929 s — 71 ms *under* the 120 s default**, not over it. The
+run at the default nevertheless never converged. At that margin the outcome is
+effectively a coin flip: the two runs were different sessions, `ctx.Err()` is
+only checked between event files so the deadline can be crossed inside one, and
+a load that loses the race caches nothing, so every retry starts from zero.
+
+Treat the table above as an order-of-magnitude guide, not a threshold. What is
+solid: sessions well inside the budget open, sessions near or past it may never
+open, and the failure is silent.
+
+Two more caveats on that 200k run: it stored only 187,743 of 200,000 task
+definitions (6.1% lost at submission time), and its logs show 108 event files
+skipped during the load (see below). Nothing in the documentation mentions the
+timeout limit, and nothing warns a user approaching it.
 
 Note the 35 s `WriteTimeout` from finding 1 binds even earlier for the *client*:
 a load past 35 s cannot deliver its response at all, which is ~56,000 tasks at
 0.63 ms. The server-side cache still gets populated, so a later request
 succeeds — which is why the failure looks like "hangs, then mysteriously works".
 
-## 6. Listing clusters logs an ERROR for its own placeholder objects
+## 6. A successful `/enter_cluster` does not mean the session loaded completely
+
+Decode and store failures are logged and skipped, and the load returns success
+anyway (`pkg/eventserver/eventserver.go:1124`, `:1165`). Every one of our
+*successful* loads did this:
+
+| Run | `Failed to store events` lines |
+|---|---:|
+| 50k at `500m` | 29 |
+| 100k at 4 cores | 63 |
+| 100k at `500m` | 75 |
+| 200k at 4 cores | 108 |
+
+So `HTTP 200` means "the server finished walking the files", not "every event is
+in the snapshot". A user cannot tell a complete session from a partial one, and
+neither could this benchmark until we read the server's own logs. Any
+per-task figure derived from a load — including ours — is really per *stored and
+successfully decoded* task.
+
+Related: every successful load in these runs shows **two** `/enter_cluster`
+requests exactly one load-duration apart (T2: 68 s, T4: 120 s). The first
+handler finishes and then cannot write its response, because the 35 s
+`WriteTimeout` from finding 1 expired long before; Go's transport retries the
+idempotent GET, and the retry hits the freshly populated cache. That is the
+mechanism behind "it hangs, then suddenly works" — and it means our measured
+latency is really *time until some request returns 200*.
+
+## 7. Listing clusters logs an ERROR for its own placeholder objects
 
 ```go
 // historyserver/pkg/storage/s3/s3.go:171-176
@@ -236,7 +275,7 @@ ignore real errors. Same pattern in the GCS, AzureBlob, and AliyunOSS readers.
 
 Fix: skip keys ending in `/` before decoding (or stop creating the placeholder).
 
-## 7. `GET /clusters` is an uncached full scan on every request
+## 8. `GET /clusters` is an uncached full scan on every request
 
 `MaxKeys=100` pagination over the whole `cluster-metadata/` prefix, with no
 caching (`s3.go:160-181`). Cost grows with the number of sessions **ever**
@@ -244,11 +283,14 @@ stored, independent of what the user is opening. It was 5–140 ms with a handfu
 of sessions here; at thousands of retained sessions it becomes the landing page's
 latency.
 
-## 8. Short jobs upload nothing until graceful shutdown
+## 9. Short jobs upload nothing until graceful shutdown
 
-With the default 5-minute rotation interval, a job that finishes sooner has all
-its events sitting on the collector's local disk. Measured, by diffing bucket
-snapshots before and after RayCluster deletion:
+Rotation fires on age **or** size (5 minutes or 100 MB, checked every 30 s), so
+a job uploads nothing before shutdown only when it is shorter than the interval
+*and* no active file reaches the size threshold. That is exactly what the 10k
+and 50k runs did; the 100k run crossed the size trigger and uploaded 142.9 MiB
+while running. Measured by diffing bucket snapshots before and after RayCluster
+deletion:
 
 | N | bytes uploaded during the job | bytes uploaded only during the shutdown flush |
 |---:|---:|---:|
@@ -256,11 +298,14 @@ snapshots before and after RayCluster deletion:
 | 50,000 | 0 | 153.3 MiB (100%) |
 | 100,000 | 142.9 MiB | 159.9 MiB (53%) |
 
-If the pod is SIGKILLed instead — node failure, `terminationGracePeriodSeconds`
-too short, OOM kill — all of that is lost, including the `cluster-metadata`
-session marker, which is only written during the same graceful drain. Without
-the marker the session does not appear in `/clusters` at all, so the loss is
-total rather than partial.
+What happens to those bytes if the pod does not exit gracefully depends on which
+failure it is, and we tested none of them. A container-only crash or OOM kill
+usually keeps the pod's `emptyDir`, and the collector resumes pending files on
+restart (`eventcollector.go:228`). A force-deleted pod or a lost node destroys
+the volume, and with it the `cluster-metadata` session marker — which is written
+during the same graceful drain, and without which the session never appears in
+`/clusters` at all. So the risk is real but conditional; treating every
+un-uploaded byte as "SIGKILL-at-risk" overstates it.
 
 This is a deliberate design trade (disk-first, batch upload), but it deserves
 documentation: **history durability currently depends on graceful pod
@@ -278,12 +323,16 @@ A related known gap is already flagged in the code: on SIGTERM the History
 Server cancels in-flight loads immediately and returns 500
 (`session_loader.go:79-82`, `TODO(jiangjiawei1103)`).
 
-## 9. Compression is off by default and costs nothing
+## 10. Compression is off by default, and is not free
 
-Not a bug, but the default looks wrong given the data: gzip cut stored bytes by
-**91%** at every scale, with CPU per event unchanged (118–125 µs vs 115–124 µs)
-and cold-load time within noise. Consider defaulting
-`RAY_COLLECTOR_EVENT_COMPRESSION_ENABLED` to `true`.
+Gzip cuts stored bytes by **91%** at every scale (ratio 0.089–0.091) with
+collector CPU per event unchanged (118–125 µs vs 115–124 µs). It is not free on
+the read path: one 100k session took 78.6 s to load compressed against 62.7,
+64.8 and 67.9 s for uncompressed runs of the same size — 16–25% depending which
+control you compare against, from a single compressed run. Storage is usually
+the scarcer resource, so defaulting
+`RAY_COLLECTOR_EVENT_COMPRESSION_ENABLED` to `true` still looks right, but the
+trade should be stated rather than called free.
 
 ---
 

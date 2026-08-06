@@ -117,8 +117,10 @@ class Chart:
         slot = (W - PAD_L - PAD_R) / len(xlabels)
         for i, lab in enumerate(xlabels):
             x = PAD_L + slot * (i + 0.5)
-            out.append(f'<text x="{x:.1f}" y="{H - PAD_B + 20:.1f}" text-anchor="middle" '
-                       f'font-family="{FONT}" font-size="12" fill="{t["ink2"]}">{html.escape(lab)}</text>')
+            for j, line in enumerate(lab.split("\n")):
+                out.append(f'<text x="{x:.1f}" y="{H - PAD_B + 20 + j * 13:.1f}" text-anchor="middle" '
+                           f'font-family="{FONT}" font-size="{12 if j == 0 else 11}" '
+                           f'fill="{t["ink2"] if j == 0 else t["muted"]}">{html.escape(line)}</text>')
         self.parts = out
         return slot
 
@@ -318,6 +320,21 @@ def build(mode, rows, outdir):
     ch.legend([("cgroup total (what a limit sees)", t["s1"]), ("Go heap", t["s3"])])
     ch.note("400 MiB + 20 KiB per task covers every size measured")
     write(ch, outdir, "hs-memory", mode)
+
+    # 4b. Quota vs Go parallelism, 50k tasks. GOMAXPROCS is forced where marked,
+    # otherwise it is whatever the runtime derives from the limit.
+    ch = Chart(t, "CPU quota or Go parallelism?",
+               "50k-task session; GOMAXPROCS forced where marked", 100, "seconds", 5)
+    slot = ch.frame(["500m\nP=2 (auto)", "500m\nP=4 forced", "4 cores\nP=1 forced",
+                     "4 cores\nP=2 forced", "4 cores\nP=4 (auto)"])
+    vals = [84.9, 84.7, 38.9, 34.1, 34.9]
+    colors = [t["s2"], t["s2"], t["s1"], t["s1"], t["s1"]]
+    for i, (v, c) in enumerate(zip(vals, colors)):
+        ch.bars(slot, [("", c)], [[None] * i + [v] + [None] * (len(vals) - i - 1)],
+                [[None] * i + [f"{v:.1f}s"] + [None] * (len(vals) - i - 1)])
+    ch.legend([("limit 500m", t["s2"]), ("limit 4 cores", t["s1"])])
+    ch.note("parallelism changes nothing; the quota changes everything")
+    write(ch, outdir, "hs-quota-vs-parallelism", mode)
 
     # 5. collector CPU per event vs node event rate
     pts = sorted((r["node_peak_events_per_s"], r["collector_us_per_event"])

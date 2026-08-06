@@ -5,10 +5,13 @@ History Server data path — Ray event aggregator → `collector` sidecar → ob
 storage → History Server — running a real Ray job on a real cluster, from 1,000
 to 100,000 tasks in a single session.
 
-Every chart below is generated from [`results/derived.csv`](results/derived.csv),
-which is generated from the raw per-run reports in [`results/`](results/), which
-are produced by the harness in [`benchmark/`](benchmark/). Nothing here is
-hand-entered.
+Every number below comes from a run in [`results/`](results/);
+[`results/derived.csv`](results/derived.csv) flattens all 60 of them, and the
+harness that produced them is in [`benchmark/`](benchmark/). The charts read
+that CSV for the size sweeps, but the control-experiment values (CPU curve,
+GOMAXPROCS/GOGC cells, flush split) are transcribed into
+[`tools/gen_charts.py`](tools/gen_charts.py) by hand — check them against the
+CSV rather than assuming they regenerate.
 
 ```
 events   E ≈ N × 4.36              1 definition + 2.36 lifecycle + 1 profile per task
@@ -47,9 +50,12 @@ resources:
     cpu: "4"      # was "500m"
 ```
 
-50k tasks: **85 s → 32 s**; 100k: **151 s → 68 s**. The plateau starts at
-**2 cores** and nothing above it helps, including removing the limit entirely —
-the load simply does not want more than ~1.2 cores.
+50k tasks: **85 s → 32 s**; 100k: **151 s → 68 s**. Returns diminish sharply
+around 1.5–2 cores: every configuration at or above 2 overlaps within the
+run-to-run spread we measured (two runs at 2 cores differed by 10.7 s), and
+removing the limit entirely is no faster than 4. The load only wants ~1.2 cores.
+Most points on that curve are single runs, so read it as "diminishing returns
+near 2" rather than a precise plateau.
 
 The 100k number at `500m` took a raised `--session-process-timeout` to measure at
 all. With the shipped 2-minute default that load is aborted at 120 s, the partial
@@ -63,8 +69,10 @@ tasks.
 collector sidecars cuts stored bytes by **91%** (3.15 KiB → 0.29 KiB per task)
 with no measurable CPU or load-time cost. It is off by default.
 
-Everything else worth configuring is in [docs/SIZING.md](docs/SIZING.md); the two
-above are the ones with no downside.
+Everything else worth configuring is in [docs/SIZING.md](docs/SIZING.md).
+Compression is not quite free — it costs 16–25% of cold-load time, measured from
+one compressed run against three uncompressed ones — but storage is usually the
+scarcer resource.
 
 ### And one that needs a code change
 
@@ -88,12 +96,13 @@ was the CPU limit, as the charts below show.
 Compression saves **91%** (ratio 0.089–0.091 across three orders of magnitude —
 event JSONL is highly repetitive at every scale), and it is **off by default**.
 
-It is not free, though: at 100k tasks with adequate CPU, a gzipped session took
-**78.6 s to load against 64.8 s uncompressed — 21% slower**. An earlier version
-of this report called the cost unmeasurable, which was an artifact of measuring
-it while the server was CPU-starved and everything was slow. Collector-side CPU
-per event is genuinely unchanged (118–125 µs vs 115–124 µs); the cost lands on
-the read path.
+It is not free, though. One 100k session took **78.6 s to load compressed**
+against **62.7, 64.8 and 67.9 s** for uncompressed runs of the same size — 16%
+to 25% slower depending which control you compare against, from a single
+compressed run. An earlier version of this report called the cost unmeasurable,
+which was an artifact of measuring it while the server was CPU-starved and
+everything was slow. Collector-side CPU per event is genuinely unchanged
+(118–125 µs vs 115–124 µs); the cost lands on the read path.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/storage-dark.svg"><img alt="Total storage per session: 300 MiB raw vs 27 MiB gzipped at 100k tasks" src="docs/img/storage-light.svg"></picture>
 
@@ -110,10 +119,13 @@ drain, without which the session never appears in the UI at all.
 
 Cold load is `GET /enter_cluster` — the first time anyone opens a dead session,
 and where all of the History Server's cost lives (process start does zero
-storage I/O). Same session, same build, same cluster; the only difference is
-`resources.limits.cpu`.
+storage I/O). Same build, same cluster, same workload definition and the only
+configuration difference is `resources.limits.cpu` — but each run generated its
+own session, so object layout and event counts differ slightly between cells.
+Comparing HS variants against one immutable stored session is the single
+biggest improvement this benchmark still needs.
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-knee-dark.svg"><img alt="Per-task cold load cost: flat at 2ms then 9.07ms at 100k under 500m, versus a flat 0.61-0.63ms at 4 cores" src="docs/img/hs-load-knee-light.svg"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-knee-dark.svg"><img alt="Per-task cold load cost stays flat at each CPU limit: about 1.5-2.3 ms at 500m and 0.6-0.7 ms at 2-4 cores, across every session size" src="docs/img/hs-load-knee-light.svg"></picture>
 
 There is no blowup and no knee. Cost per task is constant at both limits; the
 limit only sets which constant. What looked like a cliff was the server-side
@@ -142,6 +154,45 @@ Two other things sit on this path regardless of CPU: a hardcoded 35 s HTTP
 `WriteTimeout` that is *shorter* than the 2-minute load timeout it should
 outlive, and ~436,000 INFO log lines per 100k-task load (removing them bought
 13%). See [docs/FINDINGS.md](docs/FINDINGS.md).
+
+### Was it the CPU quota, or Go's parallelism?
+
+The History Server is a Go 1.26 binary, and since Go 1.25 the runtime derives
+`GOMAXPROCS` from the cgroup CPU **limit** — never from `requests` — rounding up
+but [never below 2](https://pkg.go.dev/runtime#GOMAXPROCS). So changing the limit
+changes two things at once: the CFS quota, and how many threads Go will run.
+`500m` yields `GOMAXPROCS=2`, `4` yields 4, and no limit at all yields the node's
+core count. Its own `GODEBUG=gctrace=1` output confirms each value.
+
+Forcing `GOMAXPROCS` separates them:
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-quota-vs-parallelism-dark.svg"><img alt="At a 500m limit, forcing GOMAXPROCS=4 changes nothing (84.7s vs 84.9s); at 4 cores, all of GOMAXPROCS 1, 2 and 4 land between 34 and 39 seconds" src="docs/img/hs-quota-vs-parallelism-light.svg"></picture>
+
+**The quota is what matters.** Holding the limit at `500m` and forcing four `P`s
+changes nothing (84.7 s against 84.9 s). Raising the limit to 4 while pinning
+`GOMAXPROCS=1` still gets 50k down to 38.9 s. Parallelism is worth something —
+38.9 s at one `P` against 34.1 s at two — but it is a 12% effect sitting on top
+of a 2.5× one.
+
+Nothing we tried beat what the runtime picks for itself, at `limits.cpu: 2` and
+100k tasks:
+
+| Override | Cold load | GC share | Peak Go heap |
+|---|---:|---:|---:|
+| none (`GOMAXPROCS`=2, `GOGC`=100) | 64.4 s | 5% | ~1.2 GB |
+| `GOMAXPROCS=4` | 64.6 s | 3% | 1.3 GB |
+| `GOMAXPROCS=8` | 72.2 s | 2% | 1.4 GB |
+| `GOGC=200` | 65.9 s | 2% | 2.0 GB |
+| `GOGC=400` | 70.8 s | 1% | 3.1 GB |
+
+Those latency gaps are the same size as the run-to-run spread, so treat the
+ordering as preliminary — but nothing helped, and `GOGC` is unambiguously a bad
+trade here: it does exactly what it promises, cutting GC share from 5% to 1%,
+while tripling the heap to buy down a cost that was never the bottleneck. GC
+never was: at `500m` it accounts for 8% of CPU, and setting `GOGC=400` there
+dropped it to 1% while the load still never completed.
+
+**Set the CPU limit and leave the Go runtime alone.**
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-memory-dark.svg"><img alt="Memory to load one session: 102 MiB at 1k tasks rising to 2.9 GiB at 200k, with Go heap consistently below the cgroup total" src="docs/img/hs-memory-light.svg"></picture>
 

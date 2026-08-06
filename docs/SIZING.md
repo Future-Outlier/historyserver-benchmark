@@ -74,7 +74,7 @@ far away, that headroom is what absorbs it.
 ```
 memory   = 100 MiB + (N_largest × 23 KiB) × (sessions held in cache)
 cpu      = limits 4, requests 1        NOT the 500m the sample manifest ships with
-load time = N × 0.62 ms at that limit  (N × 2 ms and superlinear at 500m)
+load time = N × 0.60 ms at that limit  (N × 1.5 ms at the shipped 500m)
 ```
 
 **Raise the CPU limit first — it is the highest-return change available.**
@@ -96,15 +96,15 @@ Measured, same build and cluster, only the limit changed:
 | `8` | 66.3 s | 1.25 | — | — |
 | no limit at all | 66.8 s | 1.23 | — | — |
 
-**The plateau starts at `2`.** Everything above it is within run-to-run noise,
-including removing the limit entirely — the load simply does not want more than
-~1.2 cores. Even `1` is enough to avoid the cliff; only the shipped `500m` fails
-outright. Per-task cost with adequate CPU is flat at 0.61–0.72 ms from 1k to
-100k tasks.
+**Returns diminish around 1.5–2 cores.** Everything at or above 2 overlaps
+within the spread we actually measured — the two 2-core runs differ by 10.7 s,
+and a later 4-core run came in at 67.9 s, outside the 62.7–64.8 s of the earlier
+two. Removing the limit entirely is no faster than 4. The load only wants ~1.2
+cores, and even `1` avoids the cliff; only the shipped `500m` fails outright.
 
-`2` runs closer to the demand and showed more variance across repeats (64.4 s
-and 75.1 s on two runs) where `4` was steady (62.7 s, 64.8 s), so `4` buys
-stability rather than speed. Either is defensible; `500m` is not.
+Most points here are single runs, so this is a shape, not a ranking: **anything
+from 2 upwards is defensible, `500m` is not**. If you need to choose, `4` gives
+the ~2.2-core peaks room without costing anything, since `requests` stays low.
 
 ### Should you set a CPU limit at all?
 
@@ -144,8 +144,12 @@ throttling entirely and is the better fit if you follow the no-CPU-limits
 convention — but do not do it without pinning `GOMAXPROCS`.
 
 The cache holds up to `--session-cache-size` sessions (default 100) with no TTL
-unless you set `--session-cache-ttl`. **The memory you must budget is not one
-session — it is every session a user might open before eviction.**
+unless you set `--session-cache-ttl`, so the memory you must budget is not one
+session but every session a user might open before eviction. **We only ever
+measured one session resident.** Whether N cached sessions cost N times the
+single-session peak — the snapshots share no structure as far as we can tell,
+but we did not verify it — is untested, so treat the multi-session numbers below
+as arithmetic, not measurement.
 
 ```
 one session resident  >=  400 MiB + N x 20 KiB     (cgroup total, what a limit sees)
@@ -177,11 +181,13 @@ If your sessions are large, cap the blast radius instead of buying RAM:
 
 ### Do not tune the Go runtime
 
-Both obvious knobs were measured at `limits.cpu: 2`, 100k tasks, and both are
-worse than leaving them alone: `GOMAXPROCS=8` costs 12% (72.2 s vs 64.4 s), and
-`GOGC=400` costs 10% while using 2.5× the memory (70.8 s, 3.1 GB heap). Go 1.25+
-already derives `GOMAXPROCS` from the CPU limit, and that value was optimal in
-every cell tested. Set the limit; leave the runtime alone.
+Both obvious knobs were tried at `limits.cpu: 2`, 100k tasks, and neither
+helped: `GOMAXPROCS=8` measured 72.2 s and `GOGC=400` 70.8 s, against 64.4 s
+with nothing set. Take the ordering as preliminary — those gaps are the same
+size as the run-to-run spread at 2 cores — but the memory side is unambiguous:
+`GOGC=400` tripled the Go heap to 3.1 GB while cutting GC share from 5% to 1%,
+so it buys memory pressure for a cost that was never the bottleneck. Set the
+CPU limit; there is no evidence that touching the Go runtime helps.
 
 ### Timeouts — and where the wall really is
 
