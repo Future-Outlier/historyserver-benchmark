@@ -1,0 +1,154 @@
+{
+  "startedAt": "2026-08-06T16:39:38.602394-05:00",
+  "config": {
+    "TaskCount": 50000,
+    "WaveSize": 2000,
+    "TaskNumCPUs": "0.2",
+    "Compression": false,
+    "RotationIntvl": "",
+    "WorkerMemLimit": "",
+    "KindNode": "bench-control-plane",
+    "HeadStatusBuffer": "",
+    "DrainSleepSec": 10,
+    "S3LocalPort": 9002,
+    "JobTimeout": 2700000000000,
+    "WarmIterations": 3,
+    "HSCPULimit": "500m",
+    "HSEnv": "GODEBUG=gctrace=1",
+    "HSArgs": "",
+    "HSOnly": "test-ns-md2s2/raycluster-historyserver/session_2026-08-06_14-35-51_963761_1",
+    "TargetTaskRate": 0,
+    "HSEnterTimeout": 600000000000,
+    "HSWarmWait": 720000000000,
+    "OutDir": "/Users/future-outlier/code/ray-project/kuberay/.claude/worktrees/benchmark/historyserver/test/benchmark/out/samesession-163537/r03-cpu500m",
+    "SkipCleanup": false
+  },
+  "env": {
+    "nodes": [
+      {
+        "name": "bench-control-plane",
+        "kubeletVersion": "v1.33.1",
+        "osImage": "Debian GNU/Linux 12 (bookworm)",
+        "cpu": "14",
+        "memory": "32813556Ki"
+      }
+    ]
+  },
+  "namespace": "test-ns-md2s2",
+  "clusterName": "raycluster-historyserver",
+  "sessionID": "session_2026-08-06_14-35-51_963761_1",
+  "job": {
+    "wallClock": 0,
+    "driverTasks": 0,
+    "driverWallSec": 0,
+    "driverRateTPS": 0
+  },
+  "flushDuration": 0,
+  "collectorLogs": null,
+  "storageDiffs": null,
+  "storage": {
+    "totalBytes": 0,
+    "objectCount": 0,
+    "categories": null,
+    "markerPresent": false,
+    "events": {
+      "countByType": null,
+      "totalEvents": 0,
+      "taskScopedEvents": 0,
+      "rawJSONLBytes": 0,
+      "storedEventBytes": 0,
+      "distinctTaskDefIDs": 0,
+      "benchJobID": "",
+      "benchJobTaskIDs": 0,
+      "expectedTasks": 0,
+      "eventsPerTask": 0,
+      "avgRawBytesPerEvent": 0,
+      "compressionRatio": 0,
+      "perNode": null
+    }
+  },
+  "historyServer": {
+    "listClusters": {
+      "endpoint": "/clusters",
+      "p50": 15296041,
+      "p95": 137430625,
+      "max": 137430625,
+      "lastBytes": 208,
+      "errors": 0
+    },
+    "enterColdLatency": 85681369958,
+    "enterMeasured": true,
+    "enterStatus": 200,
+    "warmEndpoints": [
+      {
+        "endpoint": "/api/v0/tasks?limit=50000",
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "lastBytes": 0,
+        "errors": 3
+      },
+      {
+        "endpoint": "/api/v0/tasks/summarize",
+        "p50": 2223032708,
+        "p95": 2271829750,
+        "max": 2271829750,
+        "lastBytes": 408,
+        "errors": 0
+      },
+      {
+        "endpoint": "/api/jobs/",
+        "p50": 14853125,
+        "p95": 63966625,
+        "max": 63966625,
+        "lastBytes": 1341,
+        "errors": 0
+      },
+      {
+        "endpoint": "/nodes?view=summary",
+        "p50": 9960000,
+        "p95": 12968042,
+        "max": 12968042,
+        "lastBytes": 2836,
+        "errors": 0
+      },
+      {
+        "endpoint": "/events",
+        "p50": 399922542,
+        "p95": 570937542,
+        "max": 570937542,
+        "lastBytes": 2542,
+        "errors": 0
+      }
+    ],
+    "gc": {
+      "cycles": 22,
+      "finalPercent": 6,
+      "peakHeapMB": 739,
+      "gomaxprocs": 2
+    },
+    "notes": null
+  },
+  "resources": null,
+  "cgroups": [
+    {
+      "container": "historyserver-demo-6785ff6464-nvkfx/historyserver",
+      "phase": "historyserver",
+      "samples": 91,
+      "peakAnonMiB": 1071.4296875,
+      "peakCurrentMiB": 1189.296875,
+      "avgCores": 0.486775380252882,
+      "peakCores": 0.5437753345500133
+    },
+    {
+      "container": "historyserver-demo-6785ff6464-nvkfx/historyserver",
+      "phase": "lifetime",
+      "samples": 0,
+      "peakAnonMiB": 0,
+      "peakCurrentMiB": 0,
+      "avgCores": 0,
+      "peakCores": 0,
+      "lifetimePeakMiB": 1191.5390625
+    }
+  ]
+}

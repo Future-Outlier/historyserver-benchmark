@@ -96,15 +96,23 @@ Measured, same build and cluster, only the limit changed:
 | `8` | 66.3 s | 1.25 | — | — |
 | no limit at all | 66.8 s | 1.23 | — | — |
 
-**Returns diminish around 1.5–2 cores.** Everything at or above 2 overlaps
-within the spread we actually measured — the two 2-core runs differ by 10.7 s,
-and a later 4-core run came in at 67.9 s, outside the 62.7–64.8 s of the earlier
-two. Removing the limit entirely is no faster than 4. The load only wants ~1.2
-cores, and even `1` avoids the cliff; only the shipped `500m` fails outright.
+**Anything from 1.5 cores upward is indistinguishable; only `500m` is bad.**
+That comes from a replicated sweep — one 50k session, read by each configuration
+five times in randomized order — so the spread below is real run-to-run
+variation, not a difference between sessions:
 
-Most points here are single runs, so this is a shape, not a ranking: **anything
-from 2 upwards is defensible, `500m` is not**. If you need to choose, `4` gives
-the ~2.2-core peaks room without costing anything, since `requests` stays low.
+| `limits.cpu` | median | min–max |
+|---|---:|---:|
+| `500m` (shipped) | 84.0 s | 75.3–85.8 |
+| `1` | 40.2 s | 37.8–41.2 |
+| `1.5` | 37.4 s | 34.2–39.6 |
+| `2` | 36.8 s | 31.9–38.5 |
+| `4` | 33.3 s | 31.5–36.4 |
+| no limit | 34.3 s | 31.1–36.4 |
+
+Only `500m` → `1` exceeds the noise. `1` is still measurably behind `4`, but
+`1.5` and up are not. **`2` is a sensible choice** — comfortably inside the
+plateau, with room for the ~2.2-core peaks — and `4` is no faster.
 
 ### Should you set a CPU limit at all?
 

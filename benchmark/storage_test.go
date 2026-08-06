@@ -223,7 +223,8 @@ type EventStats struct {
 	StoredEventBytes    int64            `json:"storedEventBytes"`   // object sizes as stored
 	DistinctTaskDefIDs  int              `json:"distinctTaskDefIDs"` // across ALL jobs in the session (system tasks included)
 	BenchJobID          string           `json:"benchJobID"`         // job directory with the most distinct definition taskIds
-	BenchJobTaskIDs     int              `json:"benchJobTaskIDs"`    // distinct definition taskIds within that job — the loss denominator
+	BenchJobTaskIDs     int              `json:"benchJobTaskIDs"`    // distinct definition taskIds within that job
+	BenchTaskIDs        int              `json:"benchTaskIDs"`       // distinct definition taskIds named bench_task, across every job — the loss denominator, and the only one that works with several drivers
 	ExpectedTasks       int              `json:"expectedTasks"`
 	EventsPerTask       float64          `json:"eventsPerTask"`
 	AvgRawBytesPerEvent float64          `json:"avgRawBytesPerEvent"`
@@ -251,7 +252,11 @@ type eventProbe struct {
 	EventType string `json:"eventType"`
 	Timestamp string `json:"timestamp"`
 	TaskDef   *struct {
-		TaskID string `json:"taskId"`
+		TaskID   string `json:"taskId"`
+		TaskName string `json:"taskName"`
+		TaskFunc *struct {
+			FunctionName string `json:"functionName"`
+		} `json:"taskFunc"`
 	} `json:"taskDefinitionEvent"`
 	TaskLifecycle *struct {
 		TaskID string `json:"taskId"`
@@ -259,6 +264,27 @@ type eventProbe struct {
 	ActorTaskDef *struct {
 		TaskID string `json:"taskId"`
 	} `json:"actorTaskDefinitionEvent"`
+}
+
+func (p eventProbe) taskDefID() string {
+	if p.TaskDef == nil {
+		return ""
+	}
+	return p.TaskDef.TaskID
+}
+
+func (p eventProbe) lifecycleID() string {
+	if p.TaskLifecycle == nil {
+		return ""
+	}
+	return p.TaskLifecycle.TaskID
+}
+
+func (p eventProbe) actorTaskDefID() string {
+	if p.ActorTaskDef == nil {
+		return ""
+	}
+	return p.ActorTaskDef.TaskID
 }
 
 // nodeAccumulator gathers per-node statistics during the scan.
@@ -331,6 +357,7 @@ func buildStorageReport(t *testing.T, s3Client *s3.S3, bucket, sessionPrefix, ma
 	}
 
 	globalDistinct := make(map[string]struct{}, cfg.TaskCount)
+	benchDistinct := make(map[string]struct{}, cfg.TaskCount)
 	jobDistinct := map[string]map[string]struct{}{}
 	nodes := map[string]*nodeAccumulator{}
 	for i, key := range eventKeys {
@@ -348,7 +375,7 @@ func buildStorageReport(t *testing.T, s3Client *s3.S3, bucket, sessionPrefix, ma
 				jobDistinct[jobID] = jobSet
 			}
 		}
-		if err := decodeEventObject(s3Client, bucket, key, &rep.Events, globalDistinct, jobSet, acc); err != nil {
+		if err := decodeEventObject(s3Client, bucket, key, &rep.Events, globalDistinct, jobSet, benchDistinct, acc); err != nil {
 			t.Errorf("decode event object %s: %v", key, err)
 		}
 		if (i+1)%20 == 0 {
@@ -366,6 +393,7 @@ func buildStorageReport(t *testing.T, s3Client *s3.S3, bucket, sessionPrefix, ma
 			rep.Events.BenchJobID = jobID
 		}
 	}
+	rep.Events.BenchTaskIDs = len(benchDistinct)
 	if cfg.TaskCount > 0 {
 		rep.Events.EventsPerTask = float64(rep.Events.TaskScopedEvents) / float64(cfg.TaskCount)
 	}
@@ -410,7 +438,11 @@ func jobIDFromKey(key string) string {
 
 // decodeEventObject streams one JSONL(.gz) object line by line so the test
 // process never holds a whole event file in memory.
-func decodeEventObject(s3Client *s3.S3, bucket, key string, stats *EventStats, globalDistinct, jobDistinct map[string]struct{}, acc *nodeAccumulator) error {
+// benchTaskName is the remote function the driver submits; every other task in
+// the session (the driver's own, Ray internals) is excluded by matching on it.
+const benchTaskName = "bench_task"
+
+func decodeEventObject(s3Client *s3.S3, bucket, key string, stats *EventStats, globalDistinct, jobDistinct, benchDistinct map[string]struct{}, acc *nodeAccumulator) error {
 	obj, err := s3Client.GetObject(&s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -451,12 +483,20 @@ func decodeEventObject(s3Client *s3.S3, bucket, key string, stats *EventStats, g
 					if jobDistinct != nil {
 						jobDistinct[probe.TaskDef.TaskID] = struct{}{}
 					}
+					// Name-based counting is the only denominator that stays
+					// correct with several drivers, and it excludes the driver's
+					// own task, which otherwise hides one lost benchmark task.
+					name := probe.TaskDef.TaskName
+					if name == "" && probe.TaskDef.TaskFunc != nil {
+						name = probe.TaskDef.TaskFunc.FunctionName
+					}
+					if strings.Contains(name, benchTaskName) && benchDistinct != nil {
+						benchDistinct[probe.TaskDef.TaskID] = struct{}{}
+					}
 				}
-				for _, p := range []*struct {
-					TaskID string `json:"taskId"`
-				}{probe.TaskDef, probe.TaskLifecycle, probe.ActorTaskDef} {
-					if p != nil && p.TaskID != "" {
-						acc.distinct[p.TaskID] = struct{}{}
+				for _, id := range []string{probe.taskDefID(), probe.lifecycleID(), probe.actorTaskDefID()} {
+					if id != "" {
+						acc.distinct[id] = struct{}{}
 					}
 				}
 				if ts, terr := time.Parse(time.RFC3339Nano, probe.Timestamp); terr == nil {

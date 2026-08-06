@@ -180,6 +180,15 @@ class Chart:
                         f'font-family="{FONT}" font-size="11" fill="{t["ink"]}" '
                         f'font-variant-numeric="tabular-nums">{html.escape(lab)}</text>')
 
+    def errbar(self, slot, i, lo, hi, color):
+        x = PAD_L + slot * (i + 0.5)
+        y1, y2 = self.y(hi), self.y(lo)
+        self.parts.append(f'<line x1="{x:.1f}" y1="{y1:.1f}" x2="{x:.1f}" y2="{y2:.1f}" '
+                          f'stroke="{color}" stroke-width="2"/>')
+        for y in (y1, y2):
+            self.parts.append(f'<line x1="{x - 5:.1f}" y1="{y:.1f}" x2="{x + 5:.1f}" y2="{y:.1f}" '
+                              f'stroke="{color}" stroke-width="2"/>')
+
     def dots(self, xs, ys, color, labels=None):
         """Scatter in data space; xs already scaled to 0..1 of the plot width."""
         t = self.t
@@ -295,46 +304,21 @@ def build(mode, rows, outdir):
 
     # 4. The headline: 100k, where the gap stops being a gap.
     ch = Chart(t, "How much CPU the History Server actually needs",
-               "100k-task session; only resources.limits.cpu changed", 80, "seconds", 4)
-    slot = ch.frame(["500m", "1", "1.5", "2", "3", "4", "8", "none"])
-    vals = [None, 71.2, 67.2, 64.4, 64.7, 63.8, 66.3, 66.8]
-    ch.bars(slot, [("cold load", t["s1"])], [vals],
-            [[None, "71.2s", "67.2s", "64.4s", "64.7s", "63.8s", "66.3s", "66.8s"]])
-    # 500m has no bar because that configuration never returned a response.
-    for i, word in enumerate(("never", "completed")):
-        ch.parts.append(f'<text x="{PAD_L + slot * 0.5:.1f}" y="{H - PAD_B - 22 + i * 14:.1f}" '
-                        f'text-anchor="middle" font-family="{FONT}" font-size="11" '
-                        f'fill="{t["s2"]}">{word}</text>')
-    ch.note("the plateau starts at 2 cores; the load only wants ~1.2")
+               "one 50k session, read by every configuration; 5 runs each, randomized order",
+               100, "seconds", 5)
+    slot = ch.frame(["500m", "1", "1.5", "2", "3", "4", "none"])
+    med = [84.0, 40.2, 37.4, 36.8, 34.4, 33.3, 34.3]
+    lo = [75.3, 37.8, 34.2, 31.9, 32.6, 31.5, 31.1]
+    hi = [85.8, 41.2, 39.6, 38.5, 38.0, 36.4, 36.4]
+    colors = [t["s2"]] + [t["s1"]] * 6
+    for i, (v, c) in enumerate(zip(med, colors)):
+        ch.bars(slot, [("", c)], [[None] * i + [v] + [None] * (len(med) - i - 1)],
+                [[None] * i + [f"{v:.0f}s"] + [None] * (len(med) - i - 1)])
+    for i in range(len(med)):
+        ch.errbar(slot, i, lo[i], hi[i], t["ink2"])
+    ch.legend([("shipped default", t["s2"]), ("median of 5, bars show min-max", t["s1"])])
+    ch.note("only 500m is distinguishable from its neighbour")
     write(ch, outdir, "hs-cpu-limit", mode)
-
-    # 5. Per-task cost across the whole axis: the knee only exists under the quota.
-    labels6 = ["1k", "5k", "10k", "20k", "50k", "100k"]
-    ch = Chart(t, "Cold load per task", "flat means the cost scales linearly with task count", 3,
-               "milliseconds per task", 6)
-    slot = ch.frame(["1k", "5k", "10k", "20k", "50k", "100k", "200k"])
-    ch.bars(slot, [("500m (shipped)", t["s2"]), ("2-4 cores", t["s1"])],
-            [[2.28, 1.97, 1.99, 1.88, 1.53, 1.51, None],
-             [0.69, 0.63, 0.63, 0.72, 0.61, 0.65, 0.60]],
-            [["2.3", "2.0", "2.0", "1.9", "1.5", "1.5", None],
-             ["0.69", "0.63", "0.63", "0.72", "0.61", "0.65", "0.60"]])
-    ch.legend([("500m (shipped)", t["s2"]), ("2-4 cores", t["s1"])])
-    ch.note("flat at both limits, once the server timeout is not in the way")
-    write(ch, outdir, "hs-load-knee", mode)
-
-    # 4. HS memory
-    # Go heap is what the session costs; cgroup total is what a memory limit sees.
-    heap = [None, None, 224, 869, 1271, 2115]
-    total = [102, 199, 322, 1314, 2181, 2875]
-    ch = Chart(t, "Memory to load one session", "peak while a single session is loaded and served",
-               3000, "MiB", 6)
-    slot = ch.frame(["1k", "5k", "10k", "50k", "100k", "200k"])
-    ch.bars(slot, [("cgroup total (what a limit sees)", t["s1"]), ("Go heap", t["s3"])],
-            [total, heap],
-            [[f"{v:.0f}" for v in total], [None, None, None, "869", "1271", "2115"]])
-    ch.legend([("cgroup total (what a limit sees)", t["s1"]), ("Go heap", t["s3"])])
-    ch.note("400 MiB + 20 KiB per task covers every size measured")
-    write(ch, outdir, "hs-memory", mode)
 
     # 4b. Quota vs Go parallelism, 50k tasks. GOMAXPROCS is forced where marked,
     # otherwise it is whatever the runtime derives from the limit.

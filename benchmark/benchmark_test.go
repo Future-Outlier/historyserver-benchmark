@@ -43,6 +43,8 @@ type benchConfig struct {
 	HSEnv            string        // extra env for the history server container, "K=V,K=V" (GOMAXPROCS, GODEBUG=gctrace=1, GOGC...)
 	HSArgs           string        // extra CLI flags for the history server, comma separated (e.g. --session-process-timeout=30m)
 	HSOnly           string        // "namespace/cluster/sessionID": skip generating data and measure the history server against a session already in the bucket
+	TargetTaskRate   int           // paces the driver to this many tasks/s (0 = submit as fast as the scheduler allows), making the event rate an independent variable
+	Drivers          int           // concurrent Ray drivers sharing TaskCount; each has its own event buffer and its own 10k events/s drain, so the aggregate rate is not capped by one driver
 	HSEnterTimeout   time.Duration // client budget for the first /enter_cluster attempt
 	HSWarmWait       time.Duration // total budget for warm-probe retries when the first attempt times out
 	OutDir           string        // report + CSV destination
@@ -67,6 +69,8 @@ func loadBenchConfig() benchConfig {
 		HSEnv:            envStr("BENCH_HS_ENV", ""),
 		HSArgs:           envStr("BENCH_HS_ARGS", ""),
 		HSOnly:           envStr("BENCH_HS_ONLY", ""),
+		TargetTaskRate:   envInt("BENCH_TARGET_TASK_RATE", 0),
+		Drivers:          envInt("BENCH_DRIVERS", 1),
 		HSEnterTimeout:   envDuration("BENCH_HS_ENTER_TIMEOUT", 5*time.Minute),
 		HSWarmWait:       envDuration("BENCH_HS_WARM_WAIT", 15*time.Minute),
 		OutDir:           envStr("BENCH_OUT_DIR", "out"),

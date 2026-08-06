@@ -50,12 +50,28 @@ resources:
     cpu: "4"      # was "500m"
 ```
 
-50k tasks: **85 s → 32 s**; 100k: **151 s → 68 s**. Returns diminish sharply
-around 1.5–2 cores: every configuration at or above 2 overlaps within the
-run-to-run spread we measured (two runs at 2 cores differed by 10.7 s), and
-removing the limit entirely is no faster than 4. The load only wants ~1.2 cores.
-Most points on that curve are single runs, so read it as "diminishing returns
-near 2" rather than a precise plateau.
+This curve is replicated: **one 50k session generated once, then read by every
+configuration five times in randomized order**, so the only variable is the limit
+and the bars show the real run-to-run spread.
+
+| `limits.cpu` | median | min–max | GC share | `GOMAXPROCS` |
+|---|---:|---:|---:|---:|
+| `500m` (shipped) | **84.0 s** | 75.3–85.8 | 6% | 2 |
+| `1` | 40.2 s | 37.8–41.2 | 5% | 2 |
+| `1.5` | 37.4 s | 34.2–39.6 | 3% | 2 |
+| `2` | 36.8 s | 31.9–38.5 | 3% | 2 |
+| `3` | 34.4 s | 32.6–38.0 | 1% | 3 |
+| `4` | 33.3 s | 31.5–36.4 | 1% | 4 |
+| no limit | 34.3 s | 31.1–36.4 | 0% | 14 |
+
+**Only one step is larger than the noise: `500m` → `1` core, at +43.7 s.** Every
+other adjacent pair overlaps. `1` core is still measurably slower than `4`
+(6.9 s apart against a 1.7 s standard deviation), but from **1.5 cores upward
+nothing is distinguishable from the fastest** — including removing the limit
+entirely, which sets `GOMAXPROCS` to the node's 14 cores and buys nothing.
+
+So the finding is not "more CPU is better". It is that the shipped `500m` is the
+single bad value, and one and a half cores is already enough.
 
 The 100k number at `500m` took a raised `--session-process-timeout` to measure at
 all. With the shipped 2-minute default that load is aborted at 120 s, the partial

@@ -20,37 +20,65 @@ import (
 
 // driverTemplate submits __TASK_COUNT__ no-op tasks in waves of __WAVE_SIZE__.
 // Waves bound the number of in-flight ObjectRefs so driver memory stays flat.
+// __TARGET_RATE__ paces submission so the event rate becomes an independent
+// variable: without it the rate is whatever the scheduler happens to deliver,
+// which varied only 4,277-4,776 events/s across the whole num_cpus axis.
 // Python code must avoid double quotes: the entrypoint wraps it in `python -c "..."`.
 const driverTemplate = `
 import ray
 import time
-ray.init()
+import multiprocessing
 T = __TASK_COUNT__
 WAVE = __WAVE_SIZE__
+TARGET = __TARGET_RATE__
+DRIVERS = __DRIVERS__
 
-@ray.remote(num_cpus=__TASK_NUM_CPUS__)
-def bench_task(i):
-    return i
+def submit(share, target):
+    # Each process calls ray.init() separately, so each is its own Ray driver
+    # with its own CoreWorker event buffer and its own 10k-events/s drain. One
+    # driver tops out near 3k tasks/s on this hardware; the aggregate does not.
+    ray.init()
 
-t0 = time.time()
-done = 0
-refs = []
-for i in range(T):
-    refs.append(bench_task.remote(i))
-    if len(refs) >= WAVE:
+    @ray.remote(num_cpus=__TASK_NUM_CPUS__)
+    def bench_task(i):
+        return i
+
+    t0 = time.time()
+    done = 0
+    refs = []
+    for i in range(share):
+        refs.append(bench_task.remote(i))
+        if target > 0:
+            behind = (i + 1) / target - (time.time() - t0)
+            if behind > 0:
+                time.sleep(behind)
+        if len(refs) >= WAVE:
+            ray.get(refs)
+            done += len(refs)
+            refs = []
+            print(f'BENCH_PROGRESS {done}/{share} elapsed={time.time() - t0:.1f}s', flush=True)
+    if refs:
         ray.get(refs)
         done += len(refs)
-        refs = []
-        print(f'BENCH_PROGRESS {done}/{T} elapsed={time.time() - t0:.1f}s', flush=True)
-if refs:
-    ray.get(refs)
-    done += len(refs)
+    wall = time.time() - t0
+    print(f'BENCH_DRIVER_DONE tasks={done} wall_s={wall:.2f} rate_tps={done / wall:.1f}', flush=True)
+    time.sleep(__DRAIN_SLEEP__)
+
+t0 = time.time()
+if DRIVERS <= 1:
+    submit(T, TARGET)
+else:
+    share = T // DRIVERS
+    per_driver_target = TARGET // DRIVERS if TARGET > 0 else 0
+    procs = [multiprocessing.Process(target=submit, args=(share, per_driver_target))
+             for _ in range(DRIVERS)]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join()
+    T = share * DRIVERS
 wall = time.time() - t0
-print(f'BENCH_DONE tasks={done} wall_s={wall:.2f} rate_tps={done / wall:.1f}', flush=True)
-# Drain the task-event pipeline before the driver exits: the status queue is
-# drained at <=10k events per 1s flush and the shutdown flush is a single
-# <=10k batch, so a backlog of B events needs roughly B/10k seconds here.
-time.sleep(__DRAIN_SLEEP__)
+print(f'BENCH_DONE tasks={T} wall_s={wall:.2f} rate_tps={T / wall:.1f} drivers={DRIVERS}', flush=True)
 `
 
 // JobResult captures the load-generation phase.
@@ -69,6 +97,8 @@ func runBenchJob(test Test, g *WithT, namespace *corev1.Namespace, rayCluster *r
 		"__WAVE_SIZE__", strconv.Itoa(cfg.WaveSize),
 		"__TASK_NUM_CPUS__", cfg.TaskNumCPUs,
 		"__DRAIN_SLEEP__", strconv.Itoa(cfg.DrainSleepSec),
+		"__TARGET_RATE__", strconv.Itoa(cfg.TargetTaskRate),
+		"__DRIVERS__", strconv.Itoa(cfg.Drivers),
 	).Replace(driverTemplate)
 
 	rayJob := &rayv1.RayJob{
