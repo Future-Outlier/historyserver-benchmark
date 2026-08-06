@@ -1,222 +1,130 @@
-# Results
+# Results — the numbers
 
-All numbers come from [`../results/derived.csv`](../results/derived.csv), which is
-generated from the per-run reports by `tools/derive.py`. Environment in
-[ENVIRONMENT.md](ENVIRONMENT.md).
+The narrative and charts are in the [README](../README.md). This is the
+reference table behind them, plus the measurements that did not make it into a
+chart. Everything derives from [`../results/derived.csv`](../results/derived.csv).
 
----
+## Event mix
 
-## 1. Events: how many, and of what kind
-
-A task is not one event. At N = 50,000 the bucket contained 218,214 events:
+At N = 50,000 the bucket held 218,214 events:
 
 | Event type | Count | Per task |
 |---|---:|---:|
 | `TASK_LIFECYCLE_EVENT` | 118,149 | 2.363 |
 | `TASK_PROFILE_EVENT` | 50,045 | 1.001 |
 | `TASK_DEFINITION_EVENT` | 50,005 | 1.000 |
-| everything else (node, driver-job, actor) | 15 | ~0 |
+| node / driver-job / actor events | 15 | ~0 |
 
-**k = 4.36 events per task** (4.30–4.76 across all runs; the spread is lifecycle
-events being emitted two or three times depending on how state transitions
-batch). Average raw size is **725 bytes per event** (707–745), and it does not
-drift with N — event payloads are fixed-shape.
+**k = 4.36 events per task** (4.30–4.76 across runs — lifecycle events fire two
+or three times depending on how state transitions batch), **725 B per event**
+raw (707–745), independent of N.
 
-Events split roughly evenly across the two Ray nodes, because a task's lifecycle
-is recorded twice: once by its owner (driver, on the head) and once by its
-executor (on the worker).
+Events split across nodes almost evenly, because each task's lifecycle is
+recorded twice — once by its owner on the head, once by its executor:
 
-```
-N = 50,000 tasks                    events    share
-head node   ████████████████████    118,177    54%
-worker node █████████████████       100,037    46%
-```
+| Node | Events | Raw bytes | Peak 10 s rate |
+|---|---:|---:|---:|
+| head | 118,177 (54%) | 87.8 MiB | 7,485/s |
+| worker | 100,037 (46%) | 63.2 MiB | 6,433/s |
 
-That 1:1 split is why **the head's collector is not a special case** — size it
-like a worker's.
+## Storage
 
----
+| N | raw | gzip | ratio | raw/task | gzip/task | logs |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1,000 | 2.87 MiB | 0.26 MiB | 0.089 | 3.01 KiB | 269 B | 0.30 MiB |
+| 5,000 | 15.24 MiB | 1.38 MiB | 0.090 | 3.12 KiB | 288 B | 0.51 MiB |
+| 10,000 | 31.03 MiB | 2.83 MiB | 0.091 | 3.18 KiB | 297 B | 0.73 MiB |
+| 50,000 | 151.81 MiB | 13.85 MiB | 0.091 | 3.11 KiB | 291 B | 2.48 MiB |
+| 100,000 | 301.44 MiB | 27.47 MiB | 0.091 | 3.09 KiB | 288 B | 4.61 MiB |
 
-## 2. Storage: 3.15 KiB per task raw, 91% smaller with gzip
+Logs are ~0.3 MiB fixed plus ~45 B/task for no-op tasks; a workload that prints
+grows this term independently.
 
-```
-bytes per task            0        1 KiB      2 KiB      3 KiB
-raw (gzip off)   3.15 KiB  ███████████████████████████████
-gzip on          0.29 KiB  ███
-```
+When the bytes actually reach the bucket, from snapshots at T0 (before), T1
+(after the job) and T2 (after graceful deletion):
 
-| N | raw | stored (gzip on) | ratio |
-|---:|---:|---:|---:|
-| 1,000 | 2.87 MiB | 0.26 MiB | 0.089 |
-| 5,000 | 15.24 MiB | 1.38 MiB | 0.090 |
-| 10,000 | 31.03 MiB | 2.83 MiB | 0.091 |
-| 50,000 | 151.81 MiB | 13.85 MiB | 0.091 |
-| 100,000 | 301.44 MiB | 27.47 MiB | 0.091 |
-
-The ratio is **0.091 at every scale** — event JSONL is highly repetitive, and
-compression does not get better or worse with volume. Practical form:
-
-```
-raw    S ≈ N × 3.15 KiB     100k tasks -> ~300 MiB per session
-gzip   S ≈ N × 0.29 KiB     100k tasks -> ~28 MiB per session
-```
-
-Task **logs** are a separate, much smaller category for quiet tasks: about
-0.3 MiB fixed plus ~45 B/task (4.6 MiB at N = 100,000). Real workloads that
-print will grow this term independently — it is not covered by these runs.
-
-**Gzip costs nothing measurable.** CPU per event in the collector was 118–125 µs
-with compression on versus 115–124 µs with it off, and cold-load time changed by
-under 10% (50k: 105.8 s gzip vs 97.9 s raw). It is off by default; there is no
-measured reason to leave it off.
-
-### Most of the data only lands at shutdown
-
-Bucket snapshots before the job (T0), after the job (T1), and after graceful
-deletion (T2) split the volume by when it was uploaded:
-
-| N | uploaded during job | uploaded during shutdown flush |
+| N | during job | during shutdown flush |
 |---:|---:|---:|
 | 10,000 | 0 MiB | 30.8 MiB (100%) |
 | 50,000 | 0 MiB | 153.3 MiB (100%) |
 | 100,000 | 142.9 MiB | 159.9 MiB (53%) |
 
-With the default 5-minute rotation interval, a job shorter than 5 minutes
-uploads **nothing** until the pod terminates gracefully; only the 100 MB size
-trigger rescues the 100k runs. Anything not uploaded when a pod is SIGKILLed —
-node failure, `terminationGracePeriodSeconds` expiry, OOM kill — is lost, along
-with the session marker that makes the session visible at all.
+## History Server
 
----
+Cold load = `GET /enter_cluster` on a dead session. **All of these ran under the
+sample manifest's 500m CPU limit, which the load saturates** — see
+[FINDINGS.md](FINDINGS.md#2-the-sample-manifest-gives-the-history-server-500m-of-cpu-and-the-cold-load-saturates-it).
 
-## 3. History Server: ~2 ms per task, until it isn't
+| N | cold load | ms/task | peak heap | heap/task | avg cores |
+|---:|---:|---:|---:|---:|---:|
+| 1,000 | 2.3 s | 2.28 | 95 MiB | — | 0.42 |
+| 5,000 | 9.8 s | 1.97 | 184 MiB | 38 KiB | 0.46 |
+| 10,000 | 19.9 s | 1.99 | 291 MiB | 31 KiB | 0.48 |
+| 20,000 | 33.9–41.3 s | 1.69–2.06 | 467–494 MiB | 25 KiB | 0.48–0.49 |
+| 50,000 | 97.9 s | 1.96 | 1,132 MiB | 24 KiB | 0.49 |
+| 100,000 | 907.3 s | 9.07 | 2,202 MiB | 23 KiB | 0.50 |
 
-Cold load = `GET /enter_cluster` for a dead session, the first user-visible
-action. Bars are 10 s each:
+The 100k figure is an upper bound with 10 s granularity: the client request
+times out, the server keeps loading (singleflight), and the harness re-probes
+until the warm hit lands. In the matrix runs the probe budget (15 min = 900 s)
+was shorter than the load, which is why they report "never succeeded".
 
-```
-    1k │▏                                          1.8 s
-    5k │█                                          9.8 s
-   10k │██                                        19.9 s
-   20k │████                                      37.6 s
-   50k │██████████                                97.9 s
-  100k │████████████████████████████████████████→ 907.3 s   (linear prediction: 196 s)
-       └────┬────┬────┬────┬────┬────┬────┬────┬────
-            50  100  150  200  250  300  350  400 s
-```
+Warm reads from a loaded snapshot, 10 iterations each:
 
-| N | cold load | ms per task | peak heap | heap per task |
-|---:|---:|---:|---:|---:|
-| 1,000 | 1.8 s | 1.82 | 95 MiB | — |
-| 5,000 | 9.8 s | 1.97 | 184 MiB | 38 KiB |
-| 10,000 | 19.9 s | 1.99 | 291 MiB | 31 KiB |
-| 20,000 | 33.9–41.3 s | 1.69–2.06 | 467–494 MiB | 25 KiB |
-| 50,000 | 97.9 s | 1.96 | 1,132 MiB | 24 KiB |
-| 100,000 | **907.3 s** | **9.07** | 2,202 MiB | 23 KiB |
+| Endpoint | p50 | Response |
+|---|---:|---:|
+| `/api/v0/tasks?limit=10000` | 0.99 s | 4.5 MiB |
+| `/api/v0/tasks/summarize` | 0.15–2.5 s | 408 B |
+| `/api/jobs/` | 9–46 ms | 1.2 KiB |
+| `/nodes?view=summary` | 13–89 ms | 2.8 KiB |
+| `/clusters` (uncached full scan) | 5–140 ms | 208 B |
 
-Up to 50,000 tasks the cost is **flatly linear at ~2 ms/task**. At 100,000 it is
-4.6× the linear prediction, and no default timeout anywhere in the stack is long
-enough to see the result — see [FINDINGS.md](FINDINGS.md) for the three separate
-timeouts involved and why the client never gets an answer.
+`limit` above 10,000 returns `400` by design (`RayMaxLimitFromAPIServer`,
+mirroring Ray's dashboard API), so the task list is always paginated.
 
-Memory converges to **~23 KiB of heap per task**, on top of a ~90 MiB floor. The
-snapshot is a fully materialized `[]map[string]any`, so this is structural, not
-transient: the whole session stays in the LRU cache (capacity 100 sessions, no
-TTL by default) after loading.
+### Interventions measured so far
 
-```
-peak History Server heap        0     500 MiB    1 GiB    1.5 GiB   2 GiB
-     1k     95 MiB   █▉
-     5k    184 MiB   ███▋
-    10k    291 MiB   █████▊
-    20k    480 MiB   █████████▌
-    50k  1,132 MiB   ██████████████████████▋
-   100k  2,202 MiB   ████████████████████████████████████████████
-```
+| Change | N | Before | After |
+|---|---:|---:|---:|
+| per-event `Infof` → `Debugf` | 50,000 | 97.9 s | 85.3 s (−13%) |
 
-Warm reads from a loaded snapshot are fast and small: `/api/v0/tasks?limit=10000`
-returned 4.5 MiB in ~1 s, `/api/v0/tasks/summarize` 0.15–2.5 s, `/api/jobs/` and
-`/nodes` tens of milliseconds. Note the API caps `limit` at 10,000 (`400` above
-that, matching Ray's dashboard API), so the task list is inherently paginated
-regardless of session size.
+## Collector
 
-`GET /clusters` is a full uncached scan of the metadata prefix on **every**
-request — 5–140 ms with a handful of sessions here, but it grows with the
-number of sessions ever stored, not with the session being opened.
+CPU cost per event, computed as (avg cores × job wall-clock) ÷ events on that node:
 
----
-
-## 4. Collector: constant cost per event, flat memory
-
-The most portable result in this benchmark. Across every run — 1k to 100k tasks,
-200 to 7,850 events/s per node, gzip on and off — the collector's CPU cost per
-event stayed within a narrow band:
-
-| Peak node rate (events/s) | CPU per event | Avg cores during job | Peak cores (1 s samples) |
+| Peak node rate | CPU/event | Avg cores | Peak cores |
 |---:|---:|---:|---:|
-| 202–246 | 143–150 µs | 0.01 | 0.24 |
-| 1,209–1,378 | 124 µs | 0.05 | 0.60–0.67 |
-| 2,342–2,537 | 119–122 µs | 0.08 | 0.79–0.95 |
-| 4,277–4,776 | 117–124 µs | 0.13–0.17 | 0.92–1.11 |
-| 6,962–7,850 | 115–131 µs | 0.29–0.46 | 1.05–2.05 |
+| 202–246/s | 143–150 µs | 0.01 | 0.24 |
+| 1,209–1,378/s | 124 µs | 0.05 | 0.60–0.67 |
+| 2,342–2,537/s | 119–122 µs | 0.08 | 0.79–0.95 |
+| 4,277–4,776/s | 117–124 µs | 0.13–0.17 | 0.92–1.11 |
+| 6,962–7,850/s | 115–131 µs | 0.29–0.46 | 1.05–2.05 |
 
-**≈ 120 µs of CPU per event ≈ 0.52 ms of CPU per task.** The design is
-streaming — receive, append to disk, upload in the background — so nothing about
-the total job size changes the per-event price. Peak cores are 2–4× the sustained
-average because event delivery is bursty (the aggregator batches up to 10,000
-events per POST).
+Memory, worker sidecar (head is 10–25% higher):
 
-Memory is flat in N, which is the other half of the same story:
+| N | heap (anon) | cgroup total incl. page cache | kernel lifetime peak |
+|---:|---:|---:|---:|
+| 1,000 | 62 MiB | 65 MiB | 69 MiB |
+| 10,000 | 88 MiB | 103 MiB | 110 MiB |
+| 50,000 | 114 MiB | 174 MiB | 180 MiB |
+| 100,000 | 118 MiB | 236 MiB | 248 MiB |
 
-```
-collector heap (anon) by session size       0      50 MiB   100 MiB
-      1k tasks    62 MiB   ████████████
-     10k tasks    88 MiB   █████████████████▋
-     50k tasks   114 MiB   ██████████████████████▊
-    100k tasks   117 MiB   ███████████████████████▍
-```
+Zero disk-pressure 503s and zero upload failures in every run where collector
+logs were captured (the three 100k runs and `rerun-A-n1000`). Runs marked
+`collector_log_capture=no` in `derived.csv` have structurally zero counters —
+their uploads happened during termination, which that harness version did not
+capture. Do not read those zeros as measurements.
 
-A caveat that matters for `limits`: the collector writes its spool files, so the
-cgroup's total (`memory.current`, which includes page cache and is what
-`working_set` and eviction see) reaches **235–251 MiB** at 100k tasks while the
-heap is only 117 MiB. Page cache is reclaimable — this is not an OOM risk — but a
-256Mi limit would keep the container in constant reclaim.
-
-Backpressure never engaged: **zero disk-pressure 503s and zero upload failures**
-in every run where collector logs were captured (all three 100k runs plus
-`rerun-A-n1000`). The 160 MB backpressure threshold was never approached because
-the single upload worker kept up. Collector counters in the other matrix runs
-read zero because their uploads all happened during termination, which the log
-follower in that harness version did not capture — `collector_log_capture=no` in
-`derived.csv` marks those; do not read them as measured zeros.
-
----
-
-## 5. Rate is set by the workload, not by `num_cpus`
-
-Axis B varied task concurrency (`num_cpus` 0.5 → 0.05, i.e. 4 → 40 concurrent
-tasks per node) at a fixed N = 20,000, expecting event rate to rise:
+## Concurrency (axis B, N = 20,000)
 
 | `num_cpus` | concurrency/node | driver rate | peak node event rate |
 |---:|---:|---:|---:|
-| 0.5 | 4 | 2,893 tasks/s | 4,646 events/s |
-| 0.2 | 10 | 2,501 tasks/s | 4,776 events/s |
-| 0.1 | 20 | 1,700 tasks/s | 4,277 events/s |
-| 0.05 | 40 | 1,659 tasks/s | 4,538 events/s |
+| 0.5 | 4 | 2,893 tasks/s | 4,646/s |
+| 0.2 | 10 | 2,501 tasks/s | 4,776/s |
+| 0.1 | 20 | 1,700 tasks/s | 4,277/s |
+| 0.05 | 40 | 1,659 tasks/s | 4,538/s |
 
-More concurrency made things **slower**, not faster. For no-op tasks the
-bottleneck is the driver's submission loop and the scheduler, not worker
-occupancy, and 40 Python worker processes per node cost more than they add. The
-event rate is essentially constant at ~4,500 events/s regardless.
-
-The practical consequence for sizing: **you cannot infer a collector's load from
-`num_cpus` or replica count — only from tasks/s per node.**
-
----
-
-## 6. Event loss at the tail
-
-Task IDs seen in storage versus tasks submitted, at the highest rates tested:
+## Event loss at the tail
 
 | Run | Driver rate | Drain sleep | Head event buffer | Task IDs seen |
 |---|---:|---:|---:|---:|
@@ -225,22 +133,11 @@ Task IDs seen in storage versus tasks submitted, at the highest rates tested:
 | `rerun-A-n100k-ring` | 2,692 tasks/s | 10 s | default | 100,000 / 100,000 |
 | `armA-n100k` | 2,494 tasks/s | 30 s | 1,000,000 | 100,000 / 100,000 |
 
-One run lost 460 task definitions (0.46%). The collector was not the cause —
-zero 503s, zero upload failures, and the loss is of *definition* events that
-never arrived. The consistent explanation is the **shutdown tail** in Ray's
-CoreWorker: its status-event buffer drains at up to 10,000 events per flush
-interval, so a backlog of ~76,000 events needs ~7.6 s to drain, and the driver
-slept only 10 s before exiting. At 2,880 tasks/s the required drain fits inside
-the sleep; at 3,084 it does not.
-
-This is a benchmark-harness observation, not a KubeRay defect: real jobs are not
-usually a tight submission loop that exits immediately. But it does mean **event
-completeness is not guaranteed at extreme submission rates**, and the knob that
-governs it is `RAY_task_events_max_num_status_events_buffer_on_worker` on the
-process that owns the tasks (the driver, on the head) — not the GCS-side
-`RAY_ray_event_recorder_max_queued_events`, which is a different buffer on a
-different path.
-
----
-
-## What to do with all this → [SIZING.md](SIZING.md)
+One run lost 460 task definitions (0.46%). Not the collector — zero 503s, zero
+upload failures, and the missing events never arrived. The fit is Ray's
+shutdown tail: the owner's status-event buffer drains at ≤10,000 events per
+flush, so a ~76,000-event backlog needs ~7.6 s and the driver slept 10 s. At
+2,880 tasks/s the drain fits; at 3,084 it does not. The governing knob is
+`RAY_task_events_max_num_status_events_buffer_on_worker` on the *owning*
+process (the driver, on the head) — not the GCS-side
+`RAY_ray_event_recorder_max_queued_events`.
