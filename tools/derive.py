@@ -19,7 +19,8 @@ FIELDS = [
     "events_per_task", "bytes_per_event", "raw_mib", "stored_mib", "gzip_ratio",
     "raw_b_per_task", "stored_b_per_task", "logs_mib",
     "task_ids_seen", "task_ids_expected",
-    "node_peak_events_per_s", "collector_worker_peak_mib", "collector_head_peak_mib",
+    "job_wall_s", "node_peak_events_per_s", "collector_us_per_event",
+    "collector_worker_peak_mib", "collector_head_peak_mib",
     "collector_worker_peak_cores", "collector_worker_avg_cores",
     "collector_head_peak_cores", "collector_head_avg_cores",
     "collector_503s", "collector_upload_failures", "collector_log_capture",
@@ -50,6 +51,12 @@ def row_for(path, root):
     # are structurally zero; mark them so nobody reads 0 as "measured zero".
     captured = any(c["uploads"] for c in logs)
     hs_mib = cg(report, "historyserver", "peakAnonMiB", "/historyserver")
+    wall = report["job"]["wallClock"] * NS
+    # CPU per event on the worker node: its collector only sees that node's events,
+    # which is the smaller of the two per-node counts (the head also carries
+    # owner-side lifecycle events).
+    worker_events = min((x["events"] for x in per_node), default=0)
+    worker_cores = cg(report, "job", "avgCores", "worker", "/collector")
     cold_s = hs["enterColdLatency"] * NS
     ids = ev.get("benchJobTaskIDs") or ev["distinctTaskDefIDs"]
     return {
@@ -68,7 +75,9 @@ def row_for(path, root):
         "logs_mib": round((report["storage"].get("categories") or {}).get("logs", 0) / MIB, 3),
         "task_ids_seen": ids,
         "task_ids_expected": ev["expectedTasks"],
+        "job_wall_s": round(wall, 1),
         "node_peak_events_per_s": round(max((x["peak10sEventsPerSec"] for x in per_node), default=0), 1),
+        "collector_us_per_event": round(worker_cores * wall / worker_events * 1e6, 1) if worker_events else "",
         "collector_worker_peak_mib": round(cg(report, "job", "peakAnonMiB", "worker", "/collector"), 1),
         "collector_head_peak_mib": round(cg(report, "job", "peakAnonMiB", "head", "/collector"), 1),
         "collector_worker_peak_cores": round(cg(report, "job", "peakCores", "worker", "/collector"), 3),

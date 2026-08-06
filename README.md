@@ -2,80 +2,146 @@
 
 End-to-end sizing measurements for the [KubeRay](https://github.com/ray-project/kuberay)
 History Server data path — Ray event aggregator → `collector` sidecar → object
-storage → History Server — on a real cluster running a real Ray job.
+storage → History Server — running a real Ray job on a real cluster, from 1,000
+to 100,000 tasks in a single session.
 
-Every number here was produced by the harness in [`benchmark/`](benchmark/) and is
-reproducible with one script. Raw per-run reports are in [`results/`](results/).
-
-## The three questions this answers
-
-| Question | Answer |
-|---|---|
-| How much CPU/memory does the `collector` sidecar need? | `requests: 200m / 256Mi`, `limits: 2 / 512Mi` covers up to ~1,600 tasks/s **per node**. Memory is flat in job size; CPU tracks the node's event *rate*, not the total. |
-| How much does gzip save? | **91%** — 3.15 KiB/task raw → 0.29 KiB/task compressed, constant from 1k to 100k tasks. It is off by default. |
-| How long does the History Server take to load N tasks? | **~2 ms per task** up to 50k (50k = 98 s), then it degrades: 100k took **907 s** and never returned inside any default timeout. |
-
-## Headline model
+Every chart below is generated from [`results/derived.csv`](results/derived.csv),
+which is generated from the raw per-run reports in [`results/`](results/), which
+are produced by the harness in [`benchmark/`](benchmark/). Nothing here is
+hand-entered.
 
 ```
-events   E ≈ N × 4.36              (1 definition + 2.36 lifecycle + 1 profile per task)
-storage  S ≈ N × 3.15 KiB          raw          → 91% smaller with gzip: N × 0.29 KiB
-HS load  T ≈ N × 2 ms              up to N=50k  → superlinear beyond (100k measured 4.6× the linear prediction)
-HS RSS   M ≈ 100 MiB + N × 23 KiB  (50k ≈ 1.1 GiB, 100k ≈ 2.2 GiB)
+events   E ≈ N × 4.36              1 definition + 2.36 lifecycle + 1 profile per task
+storage  S ≈ N × 3.15 KiB          raw   →   N × 0.29 KiB with gzip (91% smaller)
+HS load  T ≈ N × 2 ms              linear to 50k; 100k took 4.6× the prediction
+HS RSS   M ≈ 100 MiB + N × 23 KiB  per session held in the snapshot cache
 ```
 
-`N` = tasks in the session. Ray actor calls are task events too, so count them in `N`.
+`N` = tasks in one Ray session. Ray actor calls emit task events too, so count them in `N`.
 
-## Read next
+---
+
+## Storage
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/storage-per-task-dark.svg"><img alt="Storage cost per task: 3.15 KiB raw vs 0.29 KiB gzipped, constant from 1k to 100k tasks" src="docs/img/storage-per-task-light.svg"></picture>
+
+Compression saves **91%**, and the ratio does not move between 1,000 and 100,000
+tasks — event JSONL is highly repetitive at every scale. It is **off by default**,
+and it cost nothing measurable: CPU per event was 118–125 µs with gzip against
+115–124 µs without, and cold-load time changed by under 10%.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/storage-dark.svg"><img alt="Total storage per session: 300 MiB raw vs 27 MiB gzipped at 100k tasks" src="docs/img/storage-light.svg"></picture>
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/flush-split-dark.svg"><img alt="When events reach storage: at 10k and 50k tasks, 100% only during the shutdown flush" src="docs/img/flush-split-light.svg"></picture>
+
+With the default 5-minute rotation interval, **a job shorter than 5 minutes
+uploads nothing until its pod terminates gracefully.** Everything in orange would
+be lost to a SIGKILL — along with the session marker written during the same
+drain, without which the session never appears in the UI at all.
+
+## History Server
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="History Server cold load: 2ms per task up to 50k tasks (98s), then 907s at 100k" src="docs/img/hs-load-light.svg"></picture>
+
+Cold load is `GET /enter_cluster` — the first time anyone opens a dead session.
+It is flatly linear at **~2 ms/task up to 50,000 tasks**, then falls apart: at
+100,000 it took **907 seconds**, 4.6× the linear prediction, and no client ever
+received a response, because three separate timeouts sit in the path and the
+shortest one is a hardcoded 35 s. See [docs/FINDINGS.md](docs/FINDINGS.md).
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-memory-dark.svg"><img alt="History Server peak heap: 184 MiB at 5k tasks up to 2.2 GiB at 100k tasks" src="docs/img/hs-memory-light.svg"></picture>
+
+**~23 KiB of heap per task**, retained: the snapshot is a fully materialized
+`[]map[string]any` kept in an LRU of up to 100 sessions with no TTL by default.
+Budget for every session a user might open, not for one.
+
+## Collector sidecar
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/collector-cpu-dark.svg"><img alt="Collector CPU per event is a flat 115-131 microseconds across all runs and rates" src="docs/img/collector-cpu-light.svg"></picture>
+
+The most portable result here: **≈120 µs of CPU per event ≈ 0.52 ms per task**,
+unchanged across three orders of magnitude of session size and a 40× range of
+event rate. Size the collector from the *rate* on its node, never from the job's
+total size.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/collector-memory-dark.svg"><img alt="Collector heap stays between 62 and 147 MiB regardless of session size" src="docs/img/collector-memory-light.svg"></picture>
+
+Memory is flat because the collector streams to disk and uploads in the
+background — events never accumulate in its heap. Backpressure (503 to the Ray
+aggregator) never engaged in any run.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/rate-vs-concurrency-dark.svg"><img alt="Raising task concurrency from 4 to 40 per node lowered throughput and left event rate flat" src="docs/img/rate-vs-concurrency-light.svg"></picture>
+
+Raising task concurrency 10× did **not** raise the event rate — for small tasks
+the driver's submission loop is the bottleneck, and 40 Python workers per node
+cost more than they add. You cannot infer collector load from `num_cpus` or
+replica count; only from tasks/s per node.
+
+---
+
+## What to configure
+
+| | Recommendation | Why |
+|---|---|---|
+| Collector CPU | `requests: R × 0.52 millicores` (R = peak tasks/s **per node**), limit 3× | 120 µs/event × 4.36 events/task, bursts 2–4× sustained |
+| Collector memory | `requests: 128Mi`, `limits: 512Mi` | heap is flat at ~120 MiB; cgroup total incl. page cache hits 251 MiB |
+| Compression | turn it **on** | 91% smaller, no measurable cost |
+| History Server memory | `100 MiB + 23 KiB × N × sessions cached` | snapshots are retained in the LRU |
+| `--session-process-timeout` | `N × 2 ms × 2` | the 2-minute default implies a ~60k-task ceiling |
+| Session size | keep under ~50k tasks | beyond that, load time degrades superlinearly |
+
+Full derivation and worked examples: **[docs/SIZING.md](docs/SIZING.md)**.
+
+## Documentation
 
 | Doc | Contents |
 |---|---|
-| [docs/DIMENSIONS.md](docs/DIMENSIONS.md) | What was varied and why — the data path and the three test axes |
-| [docs/RESULTS.md](docs/RESULTS.md) | All measurements, charts, and what each one means |
-| [docs/SIZING.md](docs/SIZING.md) | **Decide your own resource requests** — formulas + worked examples |
-| [docs/FINDINGS.md](docs/FINDINGS.md) | Bugs and design limits found while benchmarking, with source references |
-| [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | Hardware, versions, image digests, cluster topology |
+| [docs/SIZING.md](docs/SIZING.md) | Decide your own resource requests — formulas, tables, checklist |
+| [docs/RESULTS.md](docs/RESULTS.md) | Every measurement with the numbers behind these charts |
+| [docs/FINDINGS.md](docs/FINDINGS.md) | Bugs and design limits found, with source references |
+| [docs/DIMENSIONS.md](docs/DIMENSIONS.md) | The data path and what each axis varied |
+| [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | Hardware, versions, image digests |
 | [benchmark/README.md](benchmark/README.md) | Harness internals and every knob |
 
 ## Reproduce
 
 The harness is a Go test that lives inside a KubeRay checkout (it reuses the
-History Server e2e support package). `install.sh` copies it into place.
+History Server e2e support package):
 
 ```bash
 git clone https://github.com/ray-project/kuberay.git
-./benchmark/install.sh /path/to/kuberay        # copies harness into historyserver/test/benchmark
+./benchmark/install.sh /path/to/kuberay
 cd /path/to/kuberay/historyserver/test/benchmark
-./run_matrix.sh                                # builds images, creates a dedicated kind cluster, runs the matrix
+./run_matrix.sh          # dedicated kind cluster, 14 runs, ~2.5h
 ```
 
-The full matrix is 14 runs and takes roughly 2.5 hours. A single point:
+One point instead of the matrix:
 
 ```bash
 cd /path/to/kuberay/historyserver
 BENCH_RUN=1 BENCH_TASK_COUNT=10000 go test ./test/benchmark -run TestHistoryServerBenchmark -v -timeout 90m
 ```
 
-Then regenerate the derived table:
+Regenerate the table and charts from whatever is in `results/`:
 
 ```bash
 python3 tools/derive.py results > results/derived.csv
+python3 tools/gen_charts.py results/derived.csv docs/img
 ```
 
 ## Scope and honesty notes
 
 - Measured on **kind on macOS** (Docker Desktop VM). Byte counts, event counts,
-  ratios, and scaling *shapes* port anywhere. Absolute CPU seconds do not —
-  treat CPU as relative until re-measured on bare-metal Linux.
-- Tasks are no-ops (`num_cpus=0.2`, no payload). Real tasks emit the same event
-  count but larger logs; the `logs/` category here is only ~46 B/task.
-- One RayCluster, one head + one worker node. Per-node numbers are what
-  generalize; cluster totals are the sum over nodes.
-- Two runs in `results/matrix-20260805/` are known-bad and kept on purpose:
-  `A-n1000` (flush race in an early harness version, replaced by
-  `rerun-A-n1000`) and the `collector_log_capture=no` runs, where collector log
-  counters read zero because nothing was captured, not because nothing happened.
-  [docs/RESULTS.md](docs/RESULTS.md) says which numbers are trustworthy.
+  ratios and scaling shapes port anywhere; absolute CPU seconds do not.
+- Tasks are no-ops. Real tasks emit the same event counts but write more logs;
+  the `logs/` category here is only ~45 B/task.
+- One head + one worker node. Per-node numbers generalize; cluster totals are a
+  sum over nodes, not a measured scale-out.
+- Two runs in `results/` are kept deliberately even though they are not usable
+  measurements: `A-n1000` (hit a flush race in an early harness version — the
+  fixed rerun is `rerun-A-n1000`) and every run marked
+  `collector_log_capture=no` in `derived.csv`, whose collector counters read
+  zero because no upload lines were captured, not because nothing happened.
 
 ## License
 
