@@ -279,12 +279,18 @@ def build(mode, rows, outdir):
     write(ch, outdir, "hs-load", mode)
 
     # 4. The headline: 100k, where the gap stops being a gap.
-    ch = Chart(t, "Cold load vs the History Server's CPU limit",
-               "50k tasks, same code and cluster; only resources.limits.cpu changed", 100, "seconds", 5)
-    slot = ch.frame(["500m (shipped)", "1", "2", "4"])
-    vals = [84.9, 38.2, 31.7, 34.9]
-    ch.bars(slot, [("cold load", t["s1"])], [vals], [[f"{v:.1f}s" for v in vals]])
-    ch.note("at 100k the 500m configuration never returned a response at all")
+    ch = Chart(t, "How much CPU the History Server actually needs",
+               "100k-task session; only resources.limits.cpu changed", 80, "seconds", 4)
+    slot = ch.frame(["500m", "1", "1.5", "2", "3", "4", "8", "none"])
+    vals = [None, 71.2, 67.2, 64.4, 64.7, 63.8, 66.3, 66.8]
+    ch.bars(slot, [("cold load", t["s1"])], [vals],
+            [[None, "71.2s", "67.2s", "64.4s", "64.7s", "63.8s", "66.3s", "66.8s"]])
+    # 500m has no bar because that configuration never returned a response.
+    for i, word in enumerate(("never", "completed")):
+        ch.parts.append(f'<text x="{PAD_L + slot * 0.5:.1f}" y="{H - PAD_B - 22 + i * 14:.1f}" '
+                        f'text-anchor="middle" font-family="{FONT}" font-size="11" '
+                        f'fill="{t["s2"]}">{word}</text>')
+    ch.note("the plateau starts at 2 cores; the load only wants ~1.2")
     write(ch, outdir, "hs-cpu-limit", mode)
 
     # 5. Per-task cost across the whole axis: the knee only exists under the quota.

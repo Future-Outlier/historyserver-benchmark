@@ -84,18 +84,26 @@ entire load in *every* run at that limit — saturated, not comfortable.
 
 Measured, same build and cluster, only the limit changed:
 
-| `limits.cpu` | 50k | 100k |
-|---|---:|---:|
-| `500m` (shipped) | 84.9 s | never completed |
-| `1` | 38.2 s | — |
-| `2` | 31.7 s | 75.1 s |
-| `4` | 34.9 s | 62.7–64.8 s |
-| `8` | — | 66.3 s |
-| no limit | — | 66.8 s |
+| `limits.cpu` | 100k cold load | cores used | peak | GC share |
+|---|---:|---:|---:|---:|
+| `500m` (shipped) | **never completed** | 0.50 | — | 6% |
+| `1` | 71.2 s | 0.98 | 1.05 | 8% |
+| `1.5` | 67.2 s | 1.12 | 1.51 | 6% |
+| **`2`** | **64.4 s** | 1.19 | 1.97 | 5% |
+| `3` | 64.7 s | 1.21 | 2.58 | 2% |
+| `4` | 62.7–64.8 s | 1.16–1.23 | 2.20 | 2% |
+| `8` | 66.3 s | 1.25 | — | — |
+| no limit at all | 66.8 s | 1.23 | — | — |
 
-The load uses ~1.2 cores sustained and peaks at ~2.2, so **`2` is the smallest
-limit that reaches the plateau** and nothing above `4` helps at all. Per-task
-cost with adequate CPU is flat: 0.61–0.72 ms from 1k to 100k tasks.
+**The plateau starts at `2`.** Everything above it is within run-to-run noise,
+including removing the limit entirely — the load simply does not want more than
+~1.2 cores. Even `1` is enough to avoid the cliff; only the shipped `500m` fails
+outright. Per-task cost with adequate CPU is flat at 0.61–0.72 ms from 1k to
+100k tasks.
+
+`2` runs closer to the demand and showed more variance across repeats (64.4 s
+and 75.1 s on two runs) where `4` was steady (62.7 s, 64.8 s), so `4` buys
+stability rather than speed. Either is defensible; `500m` is not.
 
 ### Should you set a CPU limit at all?
 

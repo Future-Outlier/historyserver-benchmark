@@ -45,7 +45,8 @@ resources:
 
 50k tasks: **85 s → 32 s**. At 100k the `500m` configuration never completed a
 cold load inside a 21-minute budget, so there is no "before" number to divide —
-that is the finding. With enough CPU the cost per task is flat at **0.61–0.72 ms**
+that is the finding. The plateau starts at **2 cores** (64.4 s at 100k) and
+nothing above it helps, including removing the limit entirely. With enough CPU the cost per task is flat at **0.61–0.72 ms**
 from 1k to 100k. The load uses ~1.2 cores sustained and bursts to 2.2, so `2`
 already captures most of the win and `8` or no limit at all buy nothing.
 
@@ -96,7 +97,7 @@ drain, without which the session never appears in the UI at all.
 
 ## History Server
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-cpu-limit-dark.svg"><img alt="Cold load of a 50k-task session by CPU limit: 84.9s at 500m, 38.2s at 1 core, 31.7s at 2, 34.9s at 4" src="docs/img/hs-cpu-limit-light.svg"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-cpu-limit-dark.svg"><img alt="Cold load of a 100k-task session by CPU limit: never completes at 500m, then 71.2s at 1 core, 67.2s at 1.5, 64.4s at 2, and flat from there through 4, 8 and no limit at all" src="docs/img/hs-cpu-limit-light.svg"></picture>
 
 Cold load is `GET /enter_cluster` — the first time anyone opens a dead session,
 and where all of the History Server's cost lives (process start does zero
