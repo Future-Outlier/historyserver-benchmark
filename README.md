@@ -42,9 +42,10 @@ resources:
     cpu: "4"      # was "500m"
 ```
 
-100k tasks: **907 s → 62.7 s**. 50k tasks: 97.9 s → 30.5 s. The load uses ~1.2
-cores sustained and bursts to 2.2, so `2` captures most of the win if 4 is too
-much to reserve.
+100k tasks: **907 s → 62.7 s**. 50k tasks: 97.9 s → 30.5 s. Measured at every
+size from 1k to 100k, the cost per task is then flat at **0.61–0.72 ms** instead
+of degrading. The load uses ~1.2 cores sustained and bursts to 2.2, so `2`
+captures most of the win if 4 is too much to reserve.
 
 **2. Turn compression on.** `RAY_COLLECTOR_EVENT_COMPRESSION_ENABLED=true` on the
 collector sidecars cuts stored bytes by **91%** (3.15 KiB → 0.29 KiB per task)

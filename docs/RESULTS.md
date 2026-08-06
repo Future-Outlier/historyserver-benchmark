@@ -93,6 +93,21 @@ Warm reads from a loaded snapshot, 10 iterations each:
 `limit` above 10,000 returns `400` by design (`RayMaxLimitFromAPIServer`,
 mirroring Ray's dashboard API), so the task list is always paginated.
 
+### The same axis at `limits.cpu: 4`
+
+| N | cold load | ms/task | peak heap | avg cores | peak cores |
+|---:|---:|---:|---:|---:|---:|
+| 1,000 | 0.69 s | 0.69 | 97 MiB | 0.6 | 1.4 |
+| 5,000 | 3.17 s | 0.63 | 197 MiB | 0.9 | 1.9 |
+| 10,000 | 6.25 s | 0.63 | 224 MiB | 1.0 | 2.0 |
+| 20,000 | 14.45 s | 0.72 | 510 MiB | 1.1 | 2.1 |
+| 50,000 | 30.52 s | 0.61 | 1,192 MiB | 1.18 | 2.17 |
+| 100,000 | 62.67 s | 0.63 | 1,673 MiB | 1.16 | 2.22 |
+
+**0.61–0.72 ms/task, flat across two orders of magnitude.** The 500m column above
+is 1.88–2.28 ms/task up to 50k and then 9.07 ms/task at 100k; the difference is
+the quota, not the data.
+
 ### Interventions measured
 
 | Change | N | Before | After | |

@@ -206,21 +206,22 @@ def build(mode, rows, outdir):
     ch.note("3.15 KiB -> 0.29 KiB  (91% saved)")
     write(ch, outdir, "storage-per-task", mode)
 
-    # 3. HS cold load under the shipped 500m limit, measured vs the 2 ms/task line.
-    # Two panels on purpose: 907s is 460x the 1k bar, so one linear axis would
-    # squash the whole 1k-50k region into invisible slivers.
-    lin4 = [r["tasks"] * 0.00196 for r in A[:4]]
-    meas4 = [r["hs_cold_s"] for r in A[:4]]
+    # 3. Cold load under both CPU limits, 1k-50k. 100k is excluded here because
+    # the 500m point (907s) is 9x the axis and would flatten everything else;
+    # it gets its own chart below.
+    FOUR = [pick(rows, f"hscpu4-n{n}") for n in (1000, 5000, 10000, 50000)]
     ch = Chart(t, "History Server cold load, 1k-50k tasks",
-               "GET /enter_cluster at the sample manifest's 500m CPU limit", 110, "seconds", 5)
+               "GET /enter_cluster, first open of a dead session", 110, "seconds", 5)
     slot = ch.frame(["1k", "5k", "10k", "50k"])
-    ch.bars(slot, [("measured", t["s1"]), ("linear @ 2 ms/task", t["s3"])], [meas4, lin4],
-            [[f"{v:.1f}s" for v in meas4], None])
-    ch.legend([("measured", t["s1"]), ("linear @ 2 ms/task", t["s3"])])
-    ch.note("measured 2.3, 9.8, 19.9, 97.8 s against 2.0, 9.8, 19.6, 98.0 predicted")
+    m500 = [r["hs_cold_s"] for r in A[:3]] + [A[3]["hs_cold_s"]]
+    m4 = [r["hs_cold_s"] for r in FOUR]
+    ch.bars(slot, [("500m (shipped)", t["s2"]), ("4 cores", t["s1"])], [m500, m4],
+            [[f"{v:.1f}s" for v in m500], [f"{v:.1f}s" for v in m4]])
+    ch.legend([("500m (shipped)", t["s2"]), ("4 cores", t["s1"])])
+    ch.note("the gap widens with session size")
     write(ch, outdir, "hs-load", mode)
 
-    # 4. The intervention that matters: the same loads with a 4-core limit.
+    # 4. The headline: 100k, where the gap stops being a gap.
     ch = Chart(t, "Cold load vs the History Server's CPU limit",
                "same sessions, same build; only resources.limits.cpu changed", 1000, "seconds", 5)
     slot = ch.frame(["50k tasks", "100k tasks"])
@@ -231,22 +232,28 @@ def build(mode, rows, outdir):
     ch.note("3.2x faster at 50k, 14.5x at 100k")
     write(ch, outdir, "hs-cpu-limit", mode)
 
-    # 5. Per-task cost: the "superlinear" knee only exists under the quota.
+    # 5. Per-task cost across the whole axis: the knee only exists under the quota.
+    labels6 = ["1k", "5k", "10k", "20k", "50k", "100k"]
     ch = Chart(t, "Cold load per task", "the knee at 100k is the CPU quota, not the data", 10,
                "milliseconds per task", 5)
-    slot = ch.frame(["5k", "10k", "50k", "100k"])
+    slot = ch.frame(labels6)
     ch.bars(slot, [("500m (shipped)", t["s2"]), ("4 cores", t["s1"])],
-            [[1.97, 1.99, 1.96, 9.07], [None, None, 0.61, 0.63]],
-            [["1.97", "1.99", "1.96", "9.07"], [None, None, "0.61", "0.63"]])
+            [[2.28, 1.97, 1.99, 1.88, 1.96, 9.07],
+             [0.69, 0.63, 0.63, 0.72, 0.61, 0.63]],
+            [["2.3", "2.0", "2.0", "1.9", "2.0", "9.07"],
+             ["0.69", "0.63", "0.63", "0.72", "0.61", "0.63"]])
     ch.legend([("500m (shipped)", t["s2"]), ("4 cores", t["s1"])])
-    ch.note("with enough CPU the cost is flat again")
+    ch.note("4 cores: flat from 1k to 100k")
     write(ch, outdir, "hs-load-knee", mode)
 
     # 4. HS memory
     mem = [r["hs_peak_mib"] for r in A]
+    mem4 = [pick(rows, f"hscpu4-n{n}")["hs_peak_mib"] for n in (1000, 5000, 10000, 50000, 100000)]
     ch = Chart(t, "History Server memory", "peak container heap while one session is loaded", 2400, "MiB")
     slot = ch.frame(xlabels)
-    ch.bars(slot, [("peak heap", t["s1"])], [mem], [[f"{v:.0f}" for v in mem]])
+    ch.bars(slot, [("500m", t["s2"]), ("4 cores", t["s1"])], [mem, mem4],
+            [[f"{v:.0f}" for v in mem], [f"{v:.0f}" for v in mem4]])
+    ch.legend([("500m", t["s2"]), ("4 cores", t["s1"])])
     ch.note("~23 KiB per task, retained in the snapshot cache")
     write(ch, outdir, "hs-memory", mode)
 
