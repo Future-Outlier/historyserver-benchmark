@@ -88,6 +88,30 @@ and the fight gets worse as the live heap grows, which is exactly what the
 This is a config-only change — no code, no rebuild — and it is the highest-return
 finding in this benchmark.
 
+### Two effects, not one: the limit also sets `GOMAXPROCS`
+
+The History Server is built with Go 1.26, and since Go 1.25 the runtime derives
+`GOMAXPROCS` from the cgroup CPU bandwidth limit — **the limit, never the
+request** ([Go 1.25 release notes](https://go.dev/doc/go1.25),
+[container-aware GOMAXPROCS](https://go.dev/blog/container-aware-gomaxprocs)),
+rounding up:
+
+```
+limits.cpu: 500m   ->  GOMAXPROCS = 1    garbage collection shares the one P with the decoder
+limits.cpu: 4      ->  GOMAXPROCS = 4
+no limit at all    ->  GOMAXPROCS = the node's logical CPU count
+```
+
+So the 907 s → 62.7 s result mixes two changes: more CPU bandwidth *and* Go
+parallelism going from 1 to 4. We did not separate them, and `GOMAXPROCS = 1` is
+the more likely primary cause, because a 2.2 GiB live heap with no parallel GC
+is exactly the shape of the observed knee. Separating them would need a run at
+`limits.cpu: 4` with `GOMAXPROCS=1` pinned.
+
+This also means **"just remove the CPU limit" is not free for this binary**: with
+no limit, `GOMAXPROCS` becomes the node's core count, so a container using ~1.2
+cores would start dozens of Ps for GC on a large node.
+
 ## 3. Cold load materializes the entire session in memory, serially
 
 ```go

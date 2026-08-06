@@ -103,6 +103,14 @@ run, so as the live heap grew, Go's GC and the decoder fought over the same half
 core. Given 4 cores (it used 1.18 average, 2.2 peak) the cost per task is flat
 again: **0.61 ms/task at 50k, 0.63 ms/task at 100k**.
 
+Two effects are bundled in that number, and we did not separate them: the
+History Server is a Go 1.26 binary, and since Go 1.25 the runtime takes
+`GOMAXPROCS` from the cgroup CPU **limit** (never the request), rounded up. So
+`500m` also meant `GOMAXPROCS = 1` — no parallel garbage collection at all,
+against a 2.2 GiB live heap. That is probably the larger half of the 14.5×. It
+also means removing the limit outright is not free here: `GOMAXPROCS` would then
+follow the node's core count. See [docs/FINDINGS.md](docs/FINDINGS.md).
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Cold load from 1k to 50k tasks tracks the 2 ms/task line exactly under the 500m limit" src="docs/img/hs-load-light.svg"></picture>
 
 Under the shipped limit the 1k–50k region is still perfectly linear, which is

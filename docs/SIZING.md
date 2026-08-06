@@ -89,6 +89,43 @@ rather than a target; 2 would capture most of the win. The apparent
 "superlinear blowup past 50k" disappears: per-task cost is 0.61 ms at 50k and
 0.63 ms at 100k.
 
+### Should you set a CPU limit at all?
+
+The usual Kubernetes advice for latency-sensitive services is to set requests and
+**no** CPU limit, because limits are enforced by CFS quota: when the quota runs
+out the container is paused for the rest of the 100 ms period even if the node is
+idle ([Resource Management](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/),
+[kubernetes#67577](https://github.com/kubernetes/kubernetes/issues/67577)). That
+advice is community convention, not documented Kubernetes policy — the official
+docs describe the mechanism and stop there.
+
+For this particular workload there is a catch. The History Server is a Go 1.26
+binary, and since Go 1.25 `GOMAXPROCS` is derived from the cgroup CPU **limit**,
+never the request. Dropping the limit therefore sets `GOMAXPROCS` to the node's
+core count, which on a 96-core node means dozens of Ps for a container that
+actually uses ~1.2 cores.
+
+Two defensible configurations:
+
+```yaml
+# A. bounded and simple - what we measured
+resources:
+  requests: { cpu: "500m" }
+  limits:   { cpu: "4" }      # GOMAXPROCS=4; measured peak was 2.2, so throttling is rare
+
+# B. no limit, but tell the runtime what to expect
+resources:
+  requests: { cpu: "1" }
+env:
+  - name: GOMAXPROCS
+    valueFrom:
+      resourceFieldRef: { resource: requests.cpu, divisor: "1" }
+```
+
+A is easier to reason about and is what the numbers above come from. B avoids
+throttling entirely and is the better fit if you follow the no-CPU-limits
+convention — but do not do it without pinning `GOMAXPROCS`.
+
 The cache holds up to `--session-cache-size` sessions (default 100) with no TTL
 unless you set `--session-cache-ttl`. **The memory you must budget is not one
 session — it is every session a user might open before eviction.**
