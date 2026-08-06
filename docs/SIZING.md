@@ -165,6 +165,14 @@ If your sessions are large, cap the blast radius instead of buying RAM:
 --session-cache-ttl=30m       # let idle snapshots go
 ```
 
+### Do not tune the Go runtime
+
+Both obvious knobs were measured at `limits.cpu: 2`, 100k tasks, and both are
+worse than leaving them alone: `GOMAXPROCS=8` costs 12% (72.2 s vs 64.4 s), and
+`GOGC=400` costs 10% while using 2.5× the memory (70.8 s, 3.1 GB heap). Go 1.25+
+already derives `GOMAXPROCS` from the CPU limit, and that value was optimal in
+every cell tested. Set the limit; leave the runtime alone.
+
 ### Timeouts — and where the wall really is
 
 This is the ceiling that actually stops people, and crossing it does not make a

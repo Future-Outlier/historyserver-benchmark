@@ -115,6 +115,27 @@ mirroring Ray's dashboard API), so the task list is always paginated.
 is 1.88–2.28 ms/task up to 50k and then 9.07 ms/task at 100k; the difference is
 the quota, not the data.
 
+### Is the runtime's automatic tuning already right? Yes.
+
+At a fixed `limits.cpu: 2` and 100k tasks, overriding what Go picks for itself
+only makes things worse:
+
+| Override | Cold load | GC share | Peak Go heap |
+|---|---:|---:|---:|
+| none (`GOMAXPROCS`=2, `GOGC`=100) | **64.4 s** | 5% | ~1.2 GB |
+| `GOMAXPROCS=4` | 64.6 s | 3% | 1.3 GB |
+| `GOMAXPROCS=8` | 72.2 s | 2% | 1.4 GB |
+| `GOGC=200` | 65.9 s | 2% | 2.0 GB |
+| `GOGC=400` | 70.8 s | 1% | 3.1 GB |
+
+Forcing more `P`s than the quota allows costs 12%. Raising `GOGC` does exactly
+what it promises — GC share falls from 5% to 1% — and the load still gets
+*slower* while using 2.5× the memory, because GC was never the constraint.
+
+Holding `GOMAXPROCS` fixed at 2 and varying only the quota isolates the real
+effect: 50k tasks go from **84.9 s at `500m` to 34.1 s at 4 cores**, with
+identical Go parallelism on both sides.
+
 ### Interventions measured
 
 | Change | N | Before | After | |
