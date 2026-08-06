@@ -39,10 +39,15 @@ for _, eventFile := range eventFileList {
 Event files can be 100 MB (the collector's rotation size), so cancellation
 granularity is one whole file.
 
-**Measured:** a 100,000-task session kept loading for **907 seconds**. Every
-client request timed out; the server kept working and eventually cached the
-snapshot, which the next request got instantly. From the user's side this is
-indistinguishable from a hang, then a mysterious success.
+**Measured:** at the shipped `500m` CPU limit, a 100,000-task session never
+returned a response — not within a 15-minute budget, and not within 21 minutes
+on a retry with the per-event log removed. It is worse than "slow": the server's
+own `--session-process-timeout` aborts the load at 2 minutes and discards the
+partial state, so each new attempt starts over. From the user's side this is a
+hang that never resolves.
+
+**What we did not measure:** how long that load would take if allowed to finish.
+Elapsed probe time is not a load time, and this report no longer quotes one.
 
 Suggested fixes, cheapest first:
 - Make `WriteTimeout` configurable and require it to be ≥ `--session-process-timeout`
@@ -71,19 +76,25 @@ thirteen matrix runs:
 
 Saturated, not "using half a core because that's all it needed".
 
-**Measured, same build and cluster, only the limit changed:**
+**Measured, same code and cluster, only the limit changed (50,000 tasks):**
 
-| N | 500m | 4 cores | speedup |
-|---:|---:|---:|---:|
-| 50,000 | 97.9 s | 30.5 s | 3.2× |
-| 100,000 | 907.3 s | 62.7 s | **14.5×** |
+| `limits.cpu` | cold load | cores used | GOMAXPROCS |
+|---|---:|---:|---:|
+| `500m` (shipped) | 84.9 s | 0.49 (saturated) | 2 |
+| `1` | 38.2 s | 0.94 (saturated) | 2 |
+| `2` | 31.7 s | 1.15 | 2 |
+| `4` | 34.9 s | 1.18 | 4 |
 
-At 4 cores the load used 1.18 cores on average and peaked at 2.2 — the work is
-not single-threaded, because Go's GC runs concurrently and wants its own cores.
-Under a half-core quota the collector and the mutator fight for the same CPU,
-and the fight gets worse as the live heap grows, which is exactly what the
-"superlinear blowup past 50k" was: at 4 cores the per-task cost is flat again
-(0.61 ms at 50k, 0.63 ms at 100k).
+At 100,000 tasks: `2` → 75.1 s, `4` → 62.7–64.8 s, `8` → 66.3 s, no limit at all
+→ 66.8 s, and `500m` → never completed. The load wants ~1.2 cores sustained with
+bursts to ~2.2, which is why `2` captures most of the benefit and nothing above
+`4` helps.
+
+The quota is the binding constraint, not Go parallelism: forcing `GOMAXPROCS=4`
+at `500m` changes nothing (85.3 → 84.7 s), while raising the limit to 4 with
+`GOMAXPROCS` pinned to 1 still loads 100k in 76.3 s. Measured GC share (from
+`GODEBUG=gctrace=1`): **8% at `500m`, 1–2% at 4 cores** — real, but far too small
+to be the main cost.
 
 This is a config-only change — no code, no rebuild — and it is the highest-return
 finding in this benchmark.
@@ -97,16 +108,15 @@ request** ([Go 1.25 release notes](https://go.dev/doc/go1.25),
 rounding up:
 
 ```
-limits.cpu: 500m   ->  GOMAXPROCS = 1    garbage collection shares the one P with the decoder
+limits.cpu: 500m   ->  GOMAXPROCS = 2    (rounds up, but never below 2)
 limits.cpu: 4      ->  GOMAXPROCS = 4
 no limit at all    ->  GOMAXPROCS = the node's logical CPU count
 ```
 
-So the 907 s → 62.7 s result mixes two changes: more CPU bandwidth *and* Go
-parallelism going from 1 to 4. We did not separate them, and `GOMAXPROCS = 1` is
-the more likely primary cause, because a 2.2 GiB live heap with no parallel GC
-is exactly the shape of the observed knee. Separating them would need a run at
-`limits.cpu: 4` with `GOMAXPROCS=1` pinned.
+We separated the two effects with forced `GOMAXPROCS` values (above): bandwidth
+dominates, parallelism is worth about 1.2×. Note the floor — the Go runtime
+never derives a `GOMAXPROCS` below 2, so `500m` gives 2, not 1, confirmed by the
+`2 P` in its own gctrace output.
 
 This also means **"just remove the CPU limit" is not free for this binary**: with
 no limit, `GOMAXPROCS` becomes the node's core count, so a container using ~1.2

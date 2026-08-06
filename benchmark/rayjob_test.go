@@ -144,9 +144,13 @@ func parseDriverLog(test Test, namespace, rayJobName string, res *JobResult) {
 // CollectorLogStat summarizes one collector container's log, surfacing
 // backpressure and upload behavior that resource metrics cannot show.
 type CollectorLogStat struct {
-	Pod              string        `json:"pod"`
-	Uploads          int           `json:"uploads"`
-	UploadedBytes    int64         `json:"uploadedBytes"`
+	Pod           string `json:"pod"`
+	Uploads       int    `json:"uploads"`
+	UploadedBytes int64  `json:"uploadedBytes"`
+	// NOTE: the collector returns 503 without logging anything
+	// (eventcollector.go:313), so this counter can never observe a real
+	// rejection. It stays for the rotation-queue-full case; a zero here is not
+	// evidence that backpressure did not happen.
 	DiskPressure503s int           `json:"diskPressure503s"`
 	RotationQueueFul int           `json:"rotationQueueFull"`
 	UploadFailures   int           `json:"uploadFailures"`

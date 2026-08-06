@@ -33,6 +33,11 @@ head *owns* every task, and the worker *executes* them.
 | raw bytes | 87.8 MiB | 63.2 MiB |
 | peak 10 s rate | 7,485/s | 6,433/s |
 
+Counts are per *receiving collector*, keyed by the node segment of the object
+path. The head file also holds 40 profile events — the driver's own — so "the
+worker emits the profile events" is true of the benchmark tasks, not literally
+of every record in the bucket.
+
 The 40 profile events on the head are the driver's own bookkeeping. The
 practical consequence: **a head collector's load scales with tasks *owned* by
 drivers there, not with tasks executed there** — excluding the head from
@@ -73,12 +78,14 @@ the sample manifest's 500m CPU limit, which the load saturates** — see
 | 10,000 | 19.9 s | 1.99 | 291 MiB | 31 KiB | 0.48 |
 | 20,000 | 33.9–41.3 s | 1.69–2.06 | 467–494 MiB | 25 KiB | 0.48–0.49 |
 | 50,000 | 97.9 s | 1.96 | 1,132 MiB | 24 KiB | 0.49 |
-| 100,000 | 907.3 s | 9.07 | 2,202 MiB | 23 KiB | 0.50 |
+| 100,000 | **never completed** | — | 2,202 MiB | — | 0.50 |
 
-The 100k figure is an upper bound with 10 s granularity: the client request
-times out, the server keeps loading (singleflight), and the harness re-probes
-until the warm hit lands. In the matrix runs the probe budget (15 min = 900 s)
-was shorter than the load, which is why they report "never succeeded".
+At 100k under `500m` no request ever returned 200, in any run, up to a 21-minute
+probe budget. Earlier versions of this report quoted the elapsed probe time
+(907 s) as if it were a load time; it is not, and it has been removed. The
+server's `--session-process-timeout` (2 min default) aborts the load and the
+next attempt restarts, so this configuration cannot produce a latency at all
+without raising that flag.
 
 Warm reads from a loaded snapshot, 10 iterations each:
 
@@ -112,19 +119,20 @@ the quota, not the data.
 
 | Change | N | Before | After | |
 |---|---:|---:|---:|---|
-| CPU limit 500m → 4 | 50,000 | 97.9 s | 30.5 s | 3.2× |
-| CPU limit 500m → 4 | 100,000 | 907.3 s | 62.7 s | **14.5×** |
+| CPU limit 500m → 2 | 50,000 | 84.9 s | 31.7 s | 2.7× |
+| CPU limit 500m → 4 | 100,000 | never completed | 62.7 s | — |
 | per-event `Infof` → `Debugf` | 50,000 | 97.9 s | 85.3 s | 1.15× |
-| per-event `Infof` → `Debugf` | 100,000 | 907.3 s | >1,270 s (never finished) | none |
+| per-event `Infof` → `Debugf` (at 500m) | 100,000 | never completed | still never completed | none |
+| forced `GOMAXPROCS=4` at 500m | 50,000 | 85.3 s | 84.7 s | none |
+| forced `GOMAXPROCS=1` at 4 cores | 100,000 | 62.7 s | 76.3 s | 0.8× |
 
-The logging change is real but small, and it does **not** explain the 100k
-blowup — with the log removed and CPU still at 500m, a 100k load ran past the
-21-minute probe budget without finishing. The CPU limit explains it: at 4 cores
-the same session loads in 62.7 s and the per-task cost is flat (0.61 ms at 50k,
-0.63 ms at 100k) instead of 4.6× worse.
+Measured GC share (`GODEBUG=gctrace=1`): 8% at `500m`/50k, 1% at 4 cores/50k,
+2% at 4 cores/100k. GC gets more expensive under starvation but is nowhere near
+large enough to be the main cost.
 
-At 4 cores the container used 1.18 cores on average and peaked at 2.2, so the
-load is not single-threaded — Go's GC wants cores of its own.
+Total CPU consumed is roughly conserved at 50k — about 41–42 core-seconds either
+way (0.8 ms of CPU per task) — so wall time is essentially that work divided by
+the parallelism the quota allows.
 
 ## Collector
 
@@ -147,11 +155,17 @@ Memory, worker sidecar (head is 10–25% higher):
 | 50,000 | 114 MiB | 174 MiB | 180 MiB |
 | 100,000 | 118 MiB | 236 MiB | 248 MiB |
 
-Zero disk-pressure 503s and zero upload failures in every run where collector
-logs were captured (the three 100k runs and `rerun-A-n1000`). Runs marked
-`collector_log_capture=no` in `derived.csv` have structurally zero counters —
-their uploads happened during termination, which that harness version did not
-capture. Do not read those zeros as measurements.
+**The 503 counter is broken and its zeros mean nothing.** The collector's
+disk-pressure path returns HTTP 503 without logging
+(`pkg/collector/eventcollector/eventcollector.go:313`), and the counter greps
+the logs, so it reports zero unconditionally. Upload-failure and queue-full
+counters do have log lines and were genuinely zero in the runs where logs were
+captured; runs marked `collector_log_capture=no` in `derived.csv` captured no
+lines at all.
+
+Memory here is cgroup *anonymous* memory, not Go heap. Where both are available
+the gap is material: at 50k the History Server's gctrace reported an 816 MB Go
+heap against 1,015 MiB of anonymous memory.
 
 ## Concurrency (axis B, N = 20,000)
 
@@ -173,10 +187,13 @@ capture. Do not read those zeros as measurements.
 | `hscpu4-n50000` | 2,965 tasks/s | 20 s | default | 50,000 / 50,000 |
 | `hscpu4-n100000` | 3,138 tasks/s | 30 s | default | **98,322 / 100,000** |
 
-Loss follows the submission rate: both runs above 3,000 tasks/s lost tasks
-(0.46% and 1.7%), every run at or below 2,965 lost none. It is not the
-collector — zero disk-pressure 503s, zero upload failures, and the missing
-*definition* events never arrived at all.
+Loss follows the submission rate: both runs above 3,000 tasks/s are short
+(0.46% and 1.7%), every run at or below 2,965 is complete. Two caveats on these
+counts. The denominator includes the driver's own task definition, so a run
+showing exactly `N/N` could still be missing one benchmark task, and a shortfall
+is one larger than it appears. And we cannot rule the collector out on
+backpressure grounds: its 503 path emits no log line, so the counter that reads
+zero could not have observed one.
 
 Our first explanation was Ray's shutdown tail (the owner's status-event buffer
 drains at ≤10,000 events per flush, so a backlog needs seconds the exiting

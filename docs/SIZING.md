@@ -39,9 +39,14 @@ resources:
   limits:   { cpu: "2",  memory: 512Mi }
 ```
 
-Why memory is a constant and not a function of N: the collector streams events
-to disk and uploads in the background, so its heap holds buffers, not history.
-Measured 62 MiB at 1k tasks and 117 MiB at 100k tasks.
+Why memory does not track N: the collector streams events to disk and uploads
+in the background, so it holds buffers, not history. Measured 62 MiB of
+anonymous memory at 1k tasks and 117 MiB at 100k — bounded and sublinear rather
+than literally flat, and anonymous memory is not the same thing as Go heap.
+
+One caveat this benchmark cannot answer: active files are keyed by job, so a
+node running many concurrent jobs may hold proportionally more. Every run here
+was a single job.
 
 Why the limit is 512Mi and not 256Mi: the container's cgroup total including page
 cache from its own spool files reached 251 MiB at 100k tasks. Page cache is
@@ -79,15 +84,18 @@ entire load in *every* run at that limit — saturated, not comfortable.
 
 Measured, same build and cluster, only the limit changed:
 
-| N | 500m | 4 cores | speedup |
-|---:|---:|---:|---:|
-| 50,000 | 97.9 s | 30.5 s | 3.2× |
-| 100,000 | 907.3 s | 62.7 s | **14.5×** |
+| `limits.cpu` | 50k | 100k |
+|---|---:|---:|
+| `500m` (shipped) | 84.9 s | never completed |
+| `1` | 38.2 s | — |
+| `2` | 31.7 s | 75.1 s |
+| `4` | 34.9 s | 62.7–64.8 s |
+| `8` | — | 66.3 s |
+| no limit | — | 66.8 s |
 
-At 4 cores it used 1.18 cores on average and peaked at 2.2, so 4 is headroom
-rather than a target; 2 would capture most of the win. The apparent
-"superlinear blowup past 50k" disappears: per-task cost is 0.61 ms at 50k and
-0.63 ms at 100k.
+The load uses ~1.2 cores sustained and peaks at ~2.2, so **`2` is the smallest
+limit that reaches the plateau** and nothing above `4` helps at all. Per-task
+cost with adequate CPU is flat: 0.61–0.72 ms from 1k to 100k tasks.
 
 ### Should you set a CPU limit at all?
 

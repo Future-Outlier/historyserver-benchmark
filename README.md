@@ -20,9 +20,10 @@ HS RSS   M ≈ 100 MiB + N × 23 KiB  per session held in the snapshot cache
 
 > **The single most valuable thing in this repo:** KubeRay's sample History
 > Server manifest caps the container at `500m` CPU, and the cold load saturates
-> it. Raising that limit to 4 cores made a 100,000-task session load
-> **14.5× faster — 907 s → 62.7 s** — and removed the superlinearity entirely.
-> Nothing else measured here comes close to that return.
+> it for its entire duration against ~1.2 cores of demand. Same code, same
+> cluster, 50,000 tasks: **85 s at `500m` versus 32 s at `2`**. At 100,000 tasks
+> the `500m` configuration never returned a response at all, while `2`–`4`
+> finish in 63–75 s. Nothing else measured here comes close to that return.
 
 `N` = tasks in one Ray session. Ray actor calls emit task events too, so count them in `N`.
 
@@ -42,10 +43,11 @@ resources:
     cpu: "4"      # was "500m"
 ```
 
-100k tasks: **907 s → 62.7 s**. 50k tasks: 97.9 s → 30.5 s. Measured at every
-size from 1k to 100k, the cost per task is then flat at **0.61–0.72 ms** instead
-of degrading. The load uses ~1.2 cores sustained and bursts to 2.2, so `2`
-captures most of the win if 4 is too much to reserve.
+50k tasks: **85 s → 32 s**. At 100k the `500m` configuration never completed a
+cold load inside a 21-minute budget, so there is no "before" number to divide —
+that is the finding. With enough CPU the cost per task is flat at **0.61–0.72 ms**
+from 1k to 100k. The load uses ~1.2 cores sustained and bursts to 2.2, so `2`
+already captures most of the win and `8` or no limit at all buy nothing.
 
 **2. Turn compression on.** `RAY_COLLECTOR_EVENT_COMPRESSION_ENABLED=true` on the
 collector sidecars cuts stored bytes by **91%** (3.15 KiB → 0.29 KiB per task)
@@ -89,7 +91,7 @@ drain, without which the session never appears in the UI at all.
 
 ## History Server
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-cpu-limit-dark.svg"><img alt="Cold load at 50k and 100k tasks: 97.9s and 907s at a 500m CPU limit versus 30.5s and 62.7s at 4 cores" src="docs/img/hs-cpu-limit-light.svg"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-cpu-limit-dark.svg"><img alt="Cold load of a 50k-task session by CPU limit: 84.9s at 500m, 38.2s at 1 core, 31.7s at 2, 34.9s at 4" src="docs/img/hs-cpu-limit-light.svg"></picture>
 
 Cold load is `GET /enter_cluster` — the first time anyone opens a dead session,
 and where all of the History Server's cost lives (process start does zero
@@ -104,21 +106,24 @@ run, so as the live heap grew, Go's GC and the decoder fought over the same half
 core. Given 4 cores (it used 1.18 average, 2.2 peak) the cost per task is flat
 again: **0.61 ms/task at 50k, 0.63 ms/task at 100k**.
 
-Two effects are bundled in that number, and we did not separate them: the
-History Server is a Go 1.26 binary, and since Go 1.25 the runtime takes
-`GOMAXPROCS` from the cgroup CPU **limit** (never the request), rounded up. So
-`500m` also meant `GOMAXPROCS = 1` — no parallel garbage collection at all,
-against a 2.2 GiB live heap. That is probably the larger half of the 14.5×. It
-also means removing the limit outright is not free here: `GOMAXPROCS` would then
-follow the node's core count. See [docs/FINDINGS.md](docs/FINDINGS.md).
+Two effects could be bundled here, and we separated them. The History Server is
+a Go 1.26 binary, and since Go 1.25 the runtime takes `GOMAXPROCS` from the
+cgroup CPU **limit**, never the request — rounded up, with a floor of 2. So
+`500m` also means `GOMAXPROCS = 2`. Controls: forcing `GOMAXPROCS=4` while
+holding the limit at `500m` changes nothing (85.3 s → 84.7 s), and raising the
+limit to 4 with `GOMAXPROCS` pinned to 1 still loads 100k in 76.3 s. **The CFS
+quota is the binding constraint; Go parallelism is worth about 1.2×.** Measured
+GC share backs this up: 8% of CPU at `500m`, 1–2% at 4 cores.
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Log-log scaling curve: at 4 cores cold load is a straight line from 0.69s at 1k tasks to 62.7s at 100k; at 500m it bends upward after 50k, reaching 907s" src="docs/img/hs-load-light.svg"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Log-log scaling curve: at 4 cores cold load is a straight line from 0.69s at 1k tasks to 62.7s at 100k; the 500m series stops at 50k because 100k never completed" src="docs/img/hs-load-light.svg"></picture>
 
 On log-log axes a straight line means the cost scales linearly with task count.
-The 4-core series is straight across two orders of magnitude; the 500m series
-tracks it until 50k and then bends. That bend is the whole story — under the
-shipped limit the linear region ends somewhere between 50k and 100k tasks, which
-is exactly where it looked like an algorithmic cliff.
+The 4-core series is straight across two orders of magnitude. The 500m series
+tracks it up to 50k and then stops: at 100k that configuration never returned a
+response, so there is no point to plot. The server's own
+`--session-process-timeout` (2 minutes by default) aborts a load that long and
+the next attempt starts from scratch, so "how slow is it really" is a question
+this configuration cannot answer without raising that flag.
 
 Two other things sit on this path regardless of CPU: a hardcoded 35 s HTTP
 `WriteTimeout` that is *shorter* than the 2-minute load timeout it should
@@ -147,9 +152,15 @@ total size.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/collector-memory-dark.svg"><img alt="Collector heap stays between 62 and 147 MiB regardless of session size" src="docs/img/collector-memory-light.svg"></picture>
 
-Memory is flat because the collector streams to disk and uploads in the
-background — events never accumulate in its heap. Backpressure (503 to the Ray
-aggregator) never engaged in any run.
+Memory does not grow with session size because the collector streams to disk
+and uploads in the background — events never accumulate in it. Note this is
+*anonymous memory* from cgroup accounting, not Go heap: where we have both
+numbers, anonymous memory overstates the Go heap by roughly 20%.
+
+We cannot say backpressure never engaged. The collector's 503 path writes an
+HTTP response without logging anything, and our counter searched the logs, so it
+reports zero whether or not any 503 happened. That instrumentation gap is a
+finding, not a result.
 
 **Size the head's collector like a worker's.** The head ran `num-cpus: "0"` — not
 a single task executed there — and it still produced **54% of all events**, because
@@ -223,11 +234,15 @@ python3 tools/gen_charts.py results/derived.csv docs/img
   the `logs/` category here is only ~45 B/task.
 - One head + one worker node. Per-node numbers generalize; cluster totals are a
   sum over nodes, not a measured scale-out.
-- Two runs in `results/` are kept deliberately even though they are not usable
-  measurements: `A-n1000` (hit a flush race in an early harness version — the
-  fixed rerun is `rerun-A-n1000`) and every run marked
-  `collector_log_capture=no` in `derived.csv`, whose collector counters read
-  zero because no upload lines were captured, not because nothing happened.
+- Several numbers in `results/` are not measurements and are labelled as such:
+  `A-n1000` (flush race in an early harness version — the fixed rerun is
+  `rerun-A-n1000`), every run marked `collector_log_capture=no`, every
+  `enterMeasured: false` run (the client never got a 200, so the elapsed time is
+  the probe budget), and all `collector_503s` values (the 503 path emits no log
+  line for the counter to find).
+- Earlier versions of this report quoted 907 s as a 100k cold-load time. That was
+  elapsed probe time on a load that never returned. It has been removed
+  everywhere; the honest statement is that the configuration did not complete.
 
 ## License
 

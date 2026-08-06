@@ -6,14 +6,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	. "github.com/ray-project/kuberay/historyserver/test/support"
+	. "github.com/ray-project/kuberay/ray-operator/test/support"
 )
 
 // EndpointStats summarizes repeated timed GETs against one endpoint.
@@ -28,34 +33,89 @@ type EndpointStats struct {
 
 // HSBenchResult captures the history server phase.
 type HSBenchResult struct {
-	ListClusters     EndpointStats   `json:"listClusters"`     // GET /clusters (uncached full scan per request)
-	EnterColdLatency time.Duration   `json:"enterColdLatency"` // GET /enter_cluster: session cold load
+	ListClusters EndpointStats `json:"listClusters"` // GET /clusters (uncached full scan per request)
+	// EnterColdLatency is a load time ONLY when EnterMeasured is true. When the
+	// probe budget expires without a 200 it is just how long we waited, which is
+	// a property of the budget, not of the server.
+	EnterColdLatency time.Duration   `json:"enterColdLatency"`
+	EnterMeasured    bool            `json:"enterMeasured"`
 	EnterStatus      int             `json:"enterStatus"`
 	WarmEndpoints    []EndpointStats `json:"warmEndpoints"` // snapshot-backed reads after the cold load
+	GC               *GCStats        `json:"gc,omitempty"`  // only when GODEBUG=gctrace=1 was injected
 	Notes            []string        `json:"notes"`
 }
 
-// hsManifest returns the manifest path to deploy. With BENCH_HS_CPU_LIMIT set it
-// writes a copy carrying a different CPU limit: the shipped manifest pins 500m,
-// and the cold load saturates it for its entire duration.
+// The exact resources block the shipped manifest carries. Anchoring on the whole
+// block (not just the number) keeps the rewrite honest if upstream changes it.
+const shippedResources = `        resources:
+          limits:
+            cpu: "500m"`
+
+// hsManifest returns the manifest path to deploy, rewriting a copy when
+// BENCH_HS_CPU_LIMIT or BENCH_HS_ENV is set.
+//
+// The CPU limit matters twice over: it is the CFS quota, and since Go 1.25 the
+// runtime also derives GOMAXPROCS from it (never from requests), so "500m" also
+// means GOMAXPROCS=1. BENCH_HS_ENV exists to separate those two effects.
 func hsManifest(t *testing.T, runDir string, cfg benchConfig) string {
-	if cfg.HSCPULimit == "" {
+	if cfg.HSCPULimit == "" && cfg.HSEnv == "" && cfg.HSArgs == "" {
 		return ""
 	}
 	raw, err := os.ReadFile(HistoryServerManifestPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", HistoryServerManifestPath, err)
 	}
-	const shipped = `cpu: "500m"`
-	if strings.Count(string(raw), shipped) != 1 {
-		t.Fatalf("%s no longer contains exactly one %s; update the benchmark", HistoryServerManifestPath, shipped)
+	patched := string(raw)
+
+	if cfg.HSCPULimit != "" {
+		if strings.Count(patched, shippedResources) != 1 {
+			t.Fatalf("%s no longer contains the expected resources block; update the benchmark",
+				HistoryServerManifestPath)
+		}
+		// "none" removes the ceiling entirely: no CFS quota, and GOMAXPROCS then
+		// follows the node's core count.
+		replacement := "        resources:\n          requests:\n            cpu: \"500m\""
+		if cfg.HSCPULimit != "none" {
+			replacement += fmt.Sprintf("\n          limits:\n            cpu: %q", cfg.HSCPULimit)
+		}
+		patched = strings.Replace(patched, shippedResources, replacement, 1)
 	}
+
+	if cfg.HSArgs != "" {
+		const argAnchor = "        - --ray-root-dir=log\n"
+		if strings.Count(patched, argAnchor) != 1 {
+			t.Fatalf("%s no longer has the expected command block; update the benchmark", HistoryServerManifestPath)
+		}
+		var b strings.Builder
+		b.WriteString(argAnchor)
+		for _, a := range strings.Split(cfg.HSArgs, ",") {
+			fmt.Fprintf(&b, "        - %s\n", strings.TrimSpace(a))
+		}
+		patched = strings.Replace(patched, argAnchor, b.String(), 1)
+	}
+
+	if cfg.HSEnv != "" {
+		const envAnchor = "        env:\n"
+		if strings.Count(patched, envAnchor) != 1 {
+			t.Fatalf("%s no longer has exactly one env block; update the benchmark", HistoryServerManifestPath)
+		}
+		var b strings.Builder
+		b.WriteString(envAnchor)
+		for _, kv := range strings.Split(cfg.HSEnv, ",") {
+			name, value, ok := strings.Cut(strings.TrimSpace(kv), "=")
+			if !ok {
+				t.Fatalf("BENCH_HS_ENV entry %q is not name=value", kv)
+			}
+			fmt.Fprintf(&b, "          - name: %s\n            value: %q\n", name, value)
+		}
+		patched = strings.Replace(patched, envAnchor, b.String(), 1)
+	}
+
 	path := filepath.Join(runDir, "historyserver-patched.yaml")
-	patched := strings.Replace(string(raw), shipped, fmt.Sprintf("cpu: %q", cfg.HSCPULimit), 1)
 	if err := os.WriteFile(path, []byte(patched), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
-	t.Logf("history server CPU limit overridden: 500m -> %s", cfg.HSCPULimit)
+	t.Logf("history server manifest patched: cpu=%q env=%q", cfg.HSCPULimit, cfg.HSEnv)
 	return path
 }
 
@@ -105,9 +165,11 @@ func runHSBench(t *testing.T, g *WithT, hsURL, namespace, clusterName, sessionID
 			res.EnterColdLatency.Round(time.Second)))
 	}
 	res.EnterStatus = status
+	res.EnterMeasured = status == http.StatusOK
 	if status != http.StatusOK {
-		res.Notes = append(res.Notes,
-			fmt.Sprintf("enter_cluster never succeeded within %s; warm reads below are expected to 503", cfg.HSWarmWait))
+		res.Notes = append(res.Notes, fmt.Sprintf(
+			"NOT A MEASUREMENT: enter_cluster never returned 200 within %s, so enterColdLatency is the probe budget, not a load time",
+			cfg.HSWarmWait))
 		return res
 	}
 	t.Logf("enter_cluster cold load took %s", res.EnterColdLatency.Round(time.Millisecond))
@@ -159,4 +221,54 @@ func timedGET(client *http.Client, url string) (status int, bytes int64, dur tim
 		return resp.StatusCode, n, dur, copyErr
 	}
 	return resp.StatusCode, n, dur, nil
+}
+
+// GCStats summarizes GODEBUG=gctrace=1 output from the history server. The
+// percentage in a gctrace line is cumulative GC CPU share since process start,
+// so the last line is what the whole cold load cost in collection.
+type GCStats struct {
+	Cycles       int     `json:"cycles"`
+	FinalPercent float64 `json:"finalPercent"`
+	PeakHeapMB   float64 `json:"peakHeapMB"`
+	GOMAXPROCS   int     `json:"gomaxprocs"`
+}
+
+// gctrace lines look like:
+// gc 12 @3.1s 7%: 0.1+45+0.2 ms clock, 0.5+12/44/0+1.0 ms cpu, 812->830->421 MB, 850 MB goal, 0 MB stacks, 0 MB globals, 4 P
+var gcTraceRe = regexp.MustCompile(`gc (\d+) @[\d.]+s (\d+)%:.*?, (\d+)->(\d+)->(\d+) MB.*?, (\d+) P`)
+
+// captureHSLogs writes the history server's container log next to the report and
+// extracts gctrace stats if GODEBUG=gctrace=1 was set.
+func captureHSLogs(test Test, namespace, runDir string) *GCStats {
+	pods, err := test.Client().Core().CoreV1().Pods(namespace).List(test.Ctx(), metav1.ListOptions{
+		LabelSelector: "app=historyserver",
+	})
+	if err != nil || len(pods.Items) == 0 {
+		LogWithTimestamp(test.T(), "no history server pod to read logs from: %v", err)
+		return nil
+	}
+	raw, err := test.Client().Core().CoreV1().Pods(namespace).
+		GetLogs(pods.Items[0].Name, &corev1.PodLogOptions{}).DoRaw(test.Ctx())
+	if err != nil {
+		LogWithTimestamp(test.T(), "failed to read history server log: %v", err)
+		return nil
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "historyserver.log"), raw, 0o644); err != nil {
+		LogWithTimestamp(test.T(), "write historyserver.log: %v", err)
+	}
+
+	matches := gcTraceRe.FindAllStringSubmatch(string(raw), -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	last := matches[len(matches)-1]
+	stats := &GCStats{Cycles: len(matches)}
+	stats.FinalPercent, _ = strconv.ParseFloat(last[2], 64)
+	stats.GOMAXPROCS, _ = strconv.Atoi(last[6])
+	for _, m := range matches {
+		if v, err := strconv.ParseFloat(m[4], 64); err == nil && v > stats.PeakHeapMB {
+			stats.PeakHeapMB = v
+		}
+	}
+	return stats
 }

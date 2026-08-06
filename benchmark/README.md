@@ -61,7 +61,9 @@ Without `BENCH_RUN=1` the test skips immediately, so `go test ./...` stays fast.
 | `BENCH_RAY_STATUS_BUFFER_HEAD` | (Ray default, 100000) | Sets `RAY_task_events_max_num_status_events_buffer_on_worker` on the **head** Ray container only — the buffer the task owner drains at exit. (`RAY_ray_event_recorder_max_queued_events` is a different, GCS-side buffer and does not affect this path.) |
 | `BENCH_DRIVER_DRAIN_SLEEP` | `10` | Seconds the driver sleeps after the last wave so the owner's status-event buffer drains before the process exits |
 | `BENCH_S3_LOCAL_PORT` | `9002` | Local port for the benchmark's own MinIO port-forward; deliberately not 9000, which e2e suites fight over |
-| `BENCH_HS_CPU_LIMIT` | (manifest default, `500m`) | Rewrites the history server manifest's CPU limit for the run. The shipped 500m is saturated for the whole cold load |
+| `BENCH_HS_CPU_LIMIT` | (manifest default, `500m`) | Rewrites the history server manifest's CPU limit; `none` removes it and keeps `requests: 500m`. The shipped 500m is saturated for the whole cold load |
+| `BENCH_HS_ENV` | (none) | Extra env on the history server container, `K=V,K=V` — e.g. `GOMAXPROCS=1`, `GODEBUG=gctrace=1`, `GOGC=400`. Needed to separate CFS quota from Go parallelism, since Go ≥1.25 derives GOMAXPROCS from the CPU limit |
+| `BENCH_HS_ARGS` | (none) | Extra history server CLI flags, comma separated — e.g. `--session-process-timeout=30m`. Without this a load longer than 2 minutes is aborted server-side and every retry starts over |
 | `BENCH_HS_ENTER_TIMEOUT` | `5m` | Client budget for the first `/enter_cluster` attempt |
 | `BENCH_HS_WARM_WAIT` | `15m` | After a timed-out first attempt, keep re-probing (the server-side load keeps running); the first warm hit upper-bounds the true load time |
 | `BENCH_KIND_NODE` | `kind-control-plane` | kind node container name for the cgroup sampler |
@@ -117,10 +119,14 @@ written even when an assertion fails mid-run.
 - `GET /clusters` rescans the entire `cluster-metadata/` prefix on every
   request (no cache, `MaxKeys=100` pagination), so its latency scales with
   total sessions ever stored, not with this run.
-- A timeout or `500` from `/enter_cluster` does not stop the load: the
-  singleflight winner keeps running server-side and caches its snapshot, so the
-  harness re-probes until the warm hit lands and reports that as an upper bound
-  on the true load time.
+- **`enterColdLatency` is a load time only when `enterMeasured` is true.** A
+  timeout does not stop the server-side load, so the harness re-probes; if a
+  probe lands, the elapsed time upper-bounds the true load. If none does, the
+  elapsed time is just the probe budget — it says nothing about the server, and
+  must not be quoted as a latency.
+- Raise `--session-process-timeout` (via `BENCH_HS_ARGS`) before concluding a
+  configuration is slow: at the 2-minute default the server aborts long loads
+  and discards the partial state, so retries never converge.
 - Missing `taskDefinitionEvent` IDs (report shows `distinct/expected`) come from
   source-side drops in Ray's owner-side status-event buffer when the driver exits
   with a backlog (raise `BENCH_DRIVER_DRAIN_SLEEP`), or from the pod termination

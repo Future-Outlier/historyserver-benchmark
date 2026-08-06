@@ -39,7 +39,9 @@ type benchConfig struct {
 	S3LocalPort      int           // local port for the benchmark's own MinIO port-forward; NOT 9000, which e2e suites on other clusters fight over
 	JobTimeout       time.Duration // wall-clock budget for the RayJob to succeed
 	WarmIterations   int           // requests per warm history server endpoint
-	HSCPULimit       string        // overrides the history server container CPU limit; the shipped manifest pins 500m, which the cold load saturates
+	HSCPULimit       string        // overrides the history server container CPU limit ("none" removes it); the shipped manifest pins 500m, which the cold load saturates
+	HSEnv            string        // extra env for the history server container, "K=V,K=V" (GOMAXPROCS, GODEBUG=gctrace=1, GOGC...)
+	HSArgs           string        // extra CLI flags for the history server, comma separated (e.g. --session-process-timeout=30m)
 	HSEnterTimeout   time.Duration // client budget for the first /enter_cluster attempt
 	HSWarmWait       time.Duration // total budget for warm-probe retries when the first attempt times out
 	OutDir           string        // report + CSV destination
@@ -61,6 +63,8 @@ func loadBenchConfig() benchConfig {
 		JobTimeout:       envDuration("BENCH_JOB_TIMEOUT", 45*time.Minute),
 		WarmIterations:   envInt("BENCH_WARM_ITERATIONS", 10),
 		HSCPULimit:       envStr("BENCH_HS_CPU_LIMIT", ""),
+		HSEnv:            envStr("BENCH_HS_ENV", ""),
+		HSArgs:           envStr("BENCH_HS_ARGS", ""),
 		HSEnterTimeout:   envDuration("BENCH_HS_ENTER_TIMEOUT", 5*time.Minute),
 		HSWarmWait:       envDuration("BENCH_HS_WARM_WAIT", 15*time.Minute),
 		OutDir:           envStr("BENCH_OUT_DIR", "out"),
@@ -188,6 +192,7 @@ func TestHistoryServerBenchmark(t *testing.T) {
 	cgroups.RegisterPods(test, namespace.Name)
 	hsURL := GetHistoryServerURL(test, g, namespace)
 	report.HistoryServer = runHSBench(t, g, hsURL, namespace.Name, rayCluster.Name, sessionID, cfg)
+	report.HistoryServer.GC = captureHSLogs(test, namespace.Name, runDir)
 
 	if !cfg.SkipCleanup {
 		DeleteS3Bucket(test, g, s3Client)

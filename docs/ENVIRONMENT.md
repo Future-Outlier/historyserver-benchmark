@@ -70,8 +70,14 @@ for that.
    the bucket, not from sampling, and do not depend on the host.
 3. **One node pair.** Per-node results generalize; anything cluster-wide is a
    sum over nodes, not a measured scale-out.
-4. **No-op tasks.** Task logs are near-empty here (~45 B/task). Real workloads
-   grow the `logs/` category independently of everything measured.
+4. **No-op tasks, one job, one worker.** Task logs are near-empty here
+   (~45 B/task); events per task, bytes per event and the gzip ratio are all
+   specific to silent no-op tasks. Everything was a single job on a single
+   worker, so per-job and per-node cardinality effects are untested.
+5. **The collector sidecars have no `resources` block.** Their pods are still
+   Burstable (the Ray containers have requests), but the collector itself has no
+   CPU request, so under node contention it would get minimum shares. The kind
+   node here was mostly idle, so these numbers are a best case.
 5. **Sampling resolution.** Memory and CPU are sampled at 1 s from cgroup v2 and
    from the kubelet summary API (whose effective resolution is ~10 s). Peak
    values additionally come from the kernel's own `memory.peak`, which polling

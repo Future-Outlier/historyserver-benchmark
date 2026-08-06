@@ -258,11 +258,11 @@ def build(mode, rows, outdir):
     ch.note("3.15 KiB -> 0.29 KiB  (91% saved)")
     write(ch, outdir, "storage-per-task", mode)
 
-    # 3. The scaling curve. Log-log because the range is 0.69s..907s: on a linear
-    # axis the small sessions vanish, which is why an earlier version of this
-    # chart simply omitted 100k.
+    # 3. The scaling curve. Log-log because the range spans three orders of
+    # magnitude. The 500m series stops at 50k on purpose: at 100k that
+    # configuration never returned a response, so there is no latency to plot.
     N6 = [1000, 5000, 10000, 20000, 50000, 100000]
-    s500 = [2.28, 9.83, 19.86, 37.60, 97.85, 907.3]
+    s500 = [2.28, 9.83, 19.86, 37.60, 97.85]
     s4 = [0.69, 3.17, 6.25, 14.45, 30.52, 62.67]
     ch = Chart(t, "History Server cold load vs session size",
                "GET /enter_cluster, log-log: a straight line means cost scales linearly with tasks",
@@ -270,37 +270,35 @@ def build(mode, rows, outdir):
     ch.logframe((3, 5), (-1, 3),
                 lambda v: {1e3: "1k", 1e4: "10k", 1e5: "100k tasks"}[v],
                 lambda v: {0.1: "0.1", 1.0: "1", 10.0: "10", 100.0: "100", 1000.0: "1,000"}[v])
-    ch.line(list(zip(N6, s500)), t["s2"],
-            [None, None, None, None, "97.8s", "907s"])
+    ch.line(list(zip(N6[:5], s500)), t["s2"],
+            [None, None, None, None, "97.8s"])
     ch.line(list(zip(N6, s4)), t["s1"],
             [None, None, None, None, "30.5s", "62.7s"])
     ch.legend([("500m (shipped)", t["s2"]), ("4 cores", t["s1"])])
-    ch.note("4 cores stays straight; 500m bends up after 50k", y=H - 13)
+    ch.note("500m stops at 50k: at 100k it never returned a response", y=H - 13)
     write(ch, outdir, "hs-load", mode)
 
     # 4. The headline: 100k, where the gap stops being a gap.
     ch = Chart(t, "Cold load vs the History Server's CPU limit",
-               "same sessions, same build; only resources.limits.cpu changed", 1000, "seconds", 5)
-    slot = ch.frame(["50k tasks", "100k tasks"])
-    ch.bars(slot, [("500m (shipped)", t["s2"]), ("4 cores", t["s1"])],
-            [[97.9, 907.3], [30.5, 62.7]],
-            [["97.9s", "907.3s"], ["30.5s", "62.7s"]])
-    ch.legend([("500m (shipped)", t["s2"]), ("4 cores", t["s1"])])
-    ch.note("3.2x faster at 50k, 14.5x at 100k")
+               "50k tasks, same code and cluster; only resources.limits.cpu changed", 100, "seconds", 5)
+    slot = ch.frame(["500m (shipped)", "1", "2", "4"])
+    vals = [84.9, 38.2, 31.7, 34.9]
+    ch.bars(slot, [("cold load", t["s1"])], [vals], [[f"{v:.1f}s" for v in vals]])
+    ch.note("at 100k the 500m configuration never returned a response at all")
     write(ch, outdir, "hs-cpu-limit", mode)
 
     # 5. Per-task cost across the whole axis: the knee only exists under the quota.
     labels6 = ["1k", "5k", "10k", "20k", "50k", "100k"]
-    ch = Chart(t, "Cold load per task", "the knee at 100k is the CPU quota, not the data", 10,
-               "milliseconds per task", 5)
+    ch = Chart(t, "Cold load per task", "flat means the cost scales linearly with task count", 3,
+               "milliseconds per task", 6)
     slot = ch.frame(labels6)
     ch.bars(slot, [("500m (shipped)", t["s2"]), ("4 cores", t["s1"])],
-            [[2.28, 1.97, 1.99, 1.88, 1.96, 9.07],
+            [[2.28, 1.97, 1.99, 1.88, 1.96, None],
              [0.69, 0.63, 0.63, 0.72, 0.61, 0.63]],
-            [["2.3", "2.0", "2.0", "1.9", "2.0", "9.07"],
+            [["2.3", "2.0", "2.0", "1.9", "2.0", None],
              ["0.69", "0.63", "0.63", "0.72", "0.61", "0.63"]])
     ch.legend([("500m (shipped)", t["s2"]), ("4 cores", t["s1"])])
-    ch.note("4 cores: flat from 1k to 100k")
+    ch.note("no 100k bar for 500m: that load never completed")
     write(ch, outdir, "hs-load-knee", mode)
 
     # 4. HS memory
