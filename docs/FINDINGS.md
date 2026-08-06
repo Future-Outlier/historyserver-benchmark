@@ -90,11 +90,19 @@ At 100,000 tasks: `2` → 75.1 s, `4` → 62.7–64.8 s, `8` → 66.3 s, no limi
 bursts to ~2.2, which is why `2` captures most of the benefit and nothing above
 `4` helps.
 
-The quota is the binding constraint, not Go parallelism: forcing `GOMAXPROCS=4`
-at `500m` changes nothing (85.3 → 84.7 s), while raising the limit to 4 with
-`GOMAXPROCS` pinned to 1 still loads 100k in 76.3 s. Measured GC share (from
-`GODEBUG=gctrace=1`): **8% at `500m`, 1–2% at 4 cores** — real, but far too small
-to be the main cost.
+The quota is the binding constraint, and three competing explanations were
+tested and eliminated:
+
+| Hypothesis | Test | Result |
+|---|---|---|
+| Go parallelism is too low | force `GOMAXPROCS=4` at `500m` | 85.3 → 84.7 s: **no effect** |
+| …and conversely | pin `GOMAXPROCS=1` at 4 cores | 100k still loads in 76.3 s |
+| GC pressure | `GOGC=400` at `500m`, 100k | GC share 6% → **1%**, heap 1.2 → 3.5 GB, and the load **still never completed** |
+| Per-event logging | `Infof` → `Debugf` | −13% at 50k; 100k at `500m` still never completed |
+
+Measured GC share is 8% at `500m` and 1–2% at 4 cores. The `GOGC` experiment is
+the decisive one: removing almost all GC work does not rescue the configuration,
+so GC was never the mechanism.
 
 This is a config-only change — no code, no rebuild — and it is the highest-return
 finding in this benchmark.
@@ -173,12 +181,27 @@ worth taking, but it is not the explanation for the 100k knee.
 
 ## 5. Defaults imply a ~60,000-task ceiling per session
 
-At the shipped 500m the measured ~2 ms/task exhausts the default 2-minute
-`--session-process-timeout` at roughly 60,000 tasks. With 4 cores (0.62 ms/task)
-that ceiling moves out to ~190,000 — but the 35 s `WriteTimeout` from finding 1
-then binds first, at about **56,000 tasks**. Neither number appears in the
-documentation, and nothing warns a user approaching them: a session past the
-limit is not degraded, it is simply unopenable.
+This is the finding that outlives every CPU tuning number, because crossing it
+does not make the session slow — it makes the session **impossible to open**.
+
+The load is aborted at `--session-process-timeout` (2 minutes by default) and
+the partial state is discarded, so the next attempt starts from scratch and the
+retry loop never converges. The threshold is just `timeout ÷ per-task cost`:
+
+| CPU limit | per-task cost | tasks that fit in the 2-minute default |
+|---|---:|---:|
+| `500m` (shipped) | ~1.7 ms | ~70,000 |
+| `2`–`4` | ~0.63 ms | ~190,000 |
+
+Both were confirmed the hard way. At `500m`, 100k never completed in any run. At
+**4 cores, 200k never completed either** — 200,000 × 0.63 ms ≈ 126 s, just past
+the 120 s default. Nothing in the documentation mentions the limit, and nothing
+warns a user approaching it.
+
+Note the 35 s `WriteTimeout` from finding 1 binds even earlier for the *client*:
+a load past 35 s cannot deliver its response at all, which is ~56,000 tasks at
+0.63 ms. The server-side cache still gets populated, so a later request
+succeeds — which is why the failure looks like "hangs, then mysteriously works".
 
 ## 6. Listing clusters logs an ERROR for its own placeholder objects
 
@@ -229,8 +252,15 @@ total rather than partial.
 
 This is a deliberate design trade (disk-first, batch upload), but it deserves
 documentation: **history durability currently depends on graceful pod
-termination.** Users who care should shorten `RAY_COLLECTOR_EVENT_ROTATION_INTERVAL`
-and lengthen `terminationGracePeriodSeconds`.
+termination.**
+
+The obvious mitigation — shorten `RAY_COLLECTOR_EVENT_ROTATION_INTERVAL` — was
+tested and **did not help here**: at 50k with a 1-minute interval, still 0 MiB
+during the job and 152.4 MiB at the flush, against 153.3 MiB with the 5-minute
+default. The reason is mundane: that job runs ~40 s, so no file is ever old
+enough to rotate, and the age check itself only runs every 30 s. The mitigation
+is untested for jobs that outlive their rotation interval, which is the case it
+was meant for.
 
 A related known gap is already flagged in the code: on SIGTERM the History
 Server cancels in-flight loads immediately and returns 500

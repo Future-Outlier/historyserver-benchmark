@@ -1,0 +1,128 @@
+# History Server Benchmark Report
+
+- Date: 2026-08-06T12:35:27-05:00
+- Tasks: 50000 (wave 2000, num_cpus=0.2), compression=false
+- Node bench-control-plane: v1.33.1, Debian GNU/Linux 12 (bookworm), cpu=14, mem=32813556Ki
+- Session: `session_2026-08-06_10-35-28_835361_1`
+
+## Load generation
+
+| metric | value |
+|---|---|
+| RayJob wall clock (k8s-observed) | 50s |
+| driver-measured wall | 18.2s |
+| driver-measured rate | 2739.6 tasks/s |
+| flush (cluster deletion incl. final upload) | 3s |
+
+## Collector
+
+| pod | uploads | uploaded bytes | disk-pressure 503s | queue-full | upload failures |
+|---|---|---|---|---|---|
+| raycluster-historyserver-cpu-worker-8dr88 | 1 | 63.20 MiB | 0 | 0 | 0 |
+| raycluster-historyserver-head-k7jpc | 5 | 87.44 MiB | 0 | 0 | 0 |
+
+## Container resources — kubelet summary API (working_set, k8s semantics, ~10s)
+
+| class | phase | samples | peak working set (MiB) | avg cores | peak cores |
+|---|---|---|---|---|---|
+| collector (head) | flush | 1 | 95.3 | 0.000 | 0.000 |
+| collector (head) | job | 50 | 128.1 | 0.347 | 0.686 |
+| collector (worker) | flush | 1 | 87.5 | 0.000 | 0.000 |
+| collector (worker) | job | 50 | 110.2 | 0.285 | 0.532 |
+| historyserver | historyserver | 113 | 1225.6 | 0.496 | 0.525 |
+| ray-head | job | 50 | 3152.9 | 0.575 | 0.801 |
+| ray-worker | job | 50 | 934.4 | 0.907 | 1.750 |
+
+## Container resources — cgroup v2 direct (anon = pure heap, 1s; lifetime peak = kernel memory.peak)
+
+| container | phase | samples | peak anon (MiB) | peak current (MiB) | avg cores | peak cores | lifetime peak (MiB) |
+|---|---|---|---|---|---|---|---|
+| historyserver-demo-6785ff6464-z75nr/historyserver | historyserver | 108 | 1015.4 | 1307.5 | 0.495 | 0.532 |  |
+| historyserver-demo-6785ff6464-z75nr/historyserver | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 1312.2 |
+| raycluster-historyserver-cpu-worker-8dr88/collector | baseline | 1 | 52.6 | 53.4 | 0.000 | 0.000 |  |
+| raycluster-historyserver-cpu-worker-8dr88/collector | flush | 1 | 84.8 | 150.9 | 0.000 | 0.000 |  |
+| raycluster-historyserver-cpu-worker-8dr88/collector | job | 47 | 112.7 | 167.0 | 0.242 | 1.060 |  |
+| raycluster-historyserver-cpu-worker-8dr88/collector | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 174.6 |
+| raycluster-historyserver-cpu-worker-8dr88/ray-worker | baseline | 1 | 269.2 | 288.0 | 0.000 | 0.000 |  |
+| raycluster-historyserver-cpu-worker-8dr88/ray-worker | job | 47 | 971.2 | 1008.1 | 0.848 | 2.109 |  |
+| raycluster-historyserver-cpu-worker-8dr88/ray-worker | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 1010.4 |
+| raycluster-historyserver-head-k7jpc/collector | baseline | 1 | 57.9 | 58.8 | 0.000 | 0.000 |  |
+| raycluster-historyserver-head-k7jpc/collector | flush | 2 | 92.1 | 186.4 | 0.870 | 0.870 |  |
+| raycluster-historyserver-head-k7jpc/collector | job | 47 | 144.0 | 224.9 | 0.345 | 1.184 |  |
+| raycluster-historyserver-head-k7jpc/collector | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 230.2 |
+| raycluster-historyserver-head-k7jpc/ray-head | baseline | 1 | 2420.8 | 2472.8 | 0.000 | 0.000 |  |
+| raycluster-historyserver-head-k7jpc/ray-head | flush | 1 | 1510.4 | 1547.4 | 0.000 | 0.000 |  |
+| raycluster-historyserver-head-k7jpc/ray-head | job | 47 | 3115.1 | 3178.4 | 0.583 | 2.399 |  |
+| raycluster-historyserver-head-k7jpc/ray-head | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 3181.1 |
+| rayjob-bench-7mt62/ray-job-submitter | job | 45 | 97.6 | 108.0 | 0.059 | 0.985 |  |
+| rayjob-bench-7mt62/ray-job-submitter | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 110.9 |
+
+## Storage delta (bucket snapshots)
+
+| window | added objs | added bytes | changed objs | changed bytes | deleted objs |
+|---|---|---|---|---|---|
+| during-job (T1-T0) | 0 | 0 B | 0 | 0 B | 0 |
+| flush (T2-T1) | 172 | 153.14 MiB | 0 | 0 B | 0 |
+
+
+## Storage footprint (session prefix)
+
+| category | bytes | share |
+|---|---|---|
+| fetched_endpoints | 475 B | 0.0% |
+| job_events | 150.63 MiB | 98.4% |
+| logs | 2.50 MiB | 1.6% |
+| node_events | 6.91 KiB | 0.0% |
+| **total** | **153.14 MiB** | (173 objects) |
+
+- Session marker present: true
+
+## Event statistics
+
+| metric | value |
+|---|---|
+| total events | 217561 |
+| task-scoped events (TASK_* + ACTOR_TASK_*) | 217547 |
+| events per task (k) | 4.35 |
+| raw JSONL bytes | 150.64 MiB |
+| stored event bytes | 150.64 MiB |
+| avg raw bytes/event | 726 |
+| compression ratio (stored/raw) | 1.000 |
+| distinct taskDefinitionEvent taskIds (all jobs) | 50005 |
+| distinct taskIds in benchmark job `03000000` | **50001 / 50000 expected** |
+
+### Per-node attribution (whose aggregator emitted the events)
+
+| node | events | raw bytes | distinct taskIds | peak 1s events | peak 10s-avg events/s |
+|---|---|---|---|---|---|
+| d495e66ded99835cca9580bc614596be120612aee558c565538bd030 | 117517 | 87.44 MiB | 50007 | 9245 | 7294.6 |
+| 3b1a69349976f4e0d91599a374b8e6bf26761dd5bf6a1ba512700d49 | 100044 | 63.20 MiB | 50000 | 7573 | 6223.0 |
+
+| event type | count |
+|---|---|
+| ACTOR_DEFINITION_EVENT | 2 |
+| ACTOR_LIFECYCLE_EVENT | 5 |
+| ACTOR_TASK_DEFINITION_EVENT | 2 |
+| DRIVER_JOB_DEFINITION_EVENT | 1 |
+| DRIVER_JOB_LIFECYCLE_EVENT | 2 |
+| NODE_DEFINITION_EVENT | 2 |
+| NODE_LIFECYCLE_EVENT | 2 |
+| TASK_DEFINITION_EVENT | 50005 |
+| TASK_LIFECYCLE_EVENT | 117481 |
+| TASK_PROFILE_EVENT | 50059 |
+
+## History server
+
+| metric | value |
+|---|---|
+| GET /clusters p50 / p95 / max | 25ms / 139ms / 139ms (errors: 0) |
+| /enter_cluster cold load | 1m24.914s (HTTP 200) |
+
+| warm endpoint | p50 | p95 | max | resp bytes | errors |
+|---|---|---|---|---|---|
+| /api/v0/tasks?limit=50000 | 0s | 0s | 0s | 0 B | 10 |
+| /api/v0/tasks/summarize | 2.209s | 2.3s | 2.3s | 408 B | 0 |
+| /api/jobs/ | 66ms | 770ms | 770ms | 1.31 KiB | 0 |
+| /nodes?view=summary | 326ms | 505ms | 505ms | 2.77 KiB | 0 |
+| /events | 86ms | 665ms | 665ms | 2.13 KiB | 0 |
+

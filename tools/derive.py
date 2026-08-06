@@ -16,7 +16,7 @@ NS = 1e-9
 
 FIELDS = [
     "run", "tasks", "gzip", "num_cpus", "driver_tps", "hs_cpu_limit",
-    "events_per_task", "bytes_per_event", "raw_mib", "stored_mib", "gzip_ratio",
+    "hs_env", "gc_percent", "gomaxprocs", "events_per_task", "bytes_per_event", "raw_mib", "stored_mib", "gzip_ratio",
     "raw_b_per_task", "stored_b_per_task", "logs_mib",
     "task_ids_seen", "task_ids_expected",
     "job_wall_s", "node_peak_events_per_s", "collector_us_per_event",
@@ -24,7 +24,7 @@ FIELDS = [
     "collector_worker_peak_cores", "collector_worker_avg_cores",
     "collector_head_peak_cores", "collector_head_avg_cores",
     "collector_503s", "collector_upload_failures", "collector_log_capture",
-    "flush_s", "hs_cold_s", "hs_status", "hs_peak_mib", "hs_b_per_task",
+    "flush_s", "hs_cold_s", "hs_measured", "hs_status", "hs_peak_mib", "hs_b_per_task",
     "ray_head_peak_mib", "ray_worker_peak_mib", "hs_ms_per_task",
 ]
 
@@ -57,6 +57,9 @@ def row_for(path, root):
     # owner-side lifecycle events).
     worker_events = min((x["events"] for x in per_node), default=0)
     worker_cores = cg(report, "job", "avgCores", "worker", "/collector")
+    # enterColdLatency is only a latency when the client actually got a 200;
+    # otherwise it is the probe budget, which says nothing about the server.
+    measured = hs.get("enterMeasured", hs["enterStatus"] == 200)
     cold_s = hs["enterColdLatency"] * NS
     ids = ev.get("benchJobTaskIDs") or ev["distinctTaskDefIDs"]
     return {
@@ -67,6 +70,9 @@ def row_for(path, root):
         "driver_tps": round(report["job"]["driverRateTPS"], 1),
         # empty config value means the run used the sample manifest's 500m
         "hs_cpu_limit": cfg.get("HSCPULimit") or "500m",
+        "hs_env": cfg.get("HSEnv", ""),
+        "gc_percent": (hs.get("gc") or {}).get("finalPercent", ""),
+        "gomaxprocs": (hs.get("gc") or {}).get("gomaxprocs", ""),
         "events_per_task": round(ev["eventsPerTask"], 3),
         "bytes_per_event": round(ev["avgRawBytesPerEvent"], 1),
         "raw_mib": round(ev["rawJSONLBytes"] / MIB, 2),
@@ -90,11 +96,12 @@ def row_for(path, root):
         "collector_upload_failures": sum(c["uploadFailures"] for c in logs),
         "collector_log_capture": "yes" if captured else "no",
         "flush_s": round(report["flushDuration"] * NS, 1),
-        "hs_cold_s": round(cold_s, 2),
+        "hs_cold_s": round(cold_s, 2) if measured else "",
+        "hs_measured": "yes" if measured else "no",
         "hs_status": hs["enterStatus"],
         "hs_peak_mib": round(hs_mib, 1),
         "hs_b_per_task": round(hs_mib * MIB / n, 1),
-        "hs_ms_per_task": round(cold_s * 1000 / n, 3) if hs["enterStatus"] == 200 else "",
+        "hs_ms_per_task": round(cold_s * 1000 / n, 3) if measured else "",
         "ray_head_peak_mib": round(cg(report, "job", "peakAnonMiB", "/ray-head"), 1),
         "ray_worker_peak_mib": round(cg(report, "job", "peakAnonMiB", "/ray-worker"), 1),
     }

@@ -75,10 +75,15 @@ was the CPU limit, as the charts below show.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/storage-per-task-dark.svg"><img alt="Storage cost per task: 3.15 KiB raw vs 0.29 KiB gzipped, constant from 1k to 100k tasks" src="docs/img/storage-per-task-light.svg"></picture>
 
-Compression saves **91%**, and the ratio does not move between 1,000 and 100,000
-tasks — event JSONL is highly repetitive at every scale. It is **off by default**,
-and it cost nothing measurable: CPU per event was 118–125 µs with gzip against
-115–124 µs without, and cold-load time changed by under 10%.
+Compression saves **91%** (ratio 0.089–0.091 across three orders of magnitude —
+event JSONL is highly repetitive at every scale), and it is **off by default**.
+
+It is not free, though: at 100k tasks with adequate CPU, a gzipped session took
+**78.6 s to load against 64.8 s uncompressed — 21% slower**. An earlier version
+of this report called the cost unmeasurable, which was an artifact of measuring
+it while the server was CPU-starved and everything was slow. Collector-side CPU
+per event is genuinely unchanged (118–125 µs vs 115–124 µs); the cost lands on
+the read path.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/storage-dark.svg"><img alt="Total storage per session: 300 MiB raw vs 27 MiB gzipped at 100k tasks" src="docs/img/storage-light.svg"></picture>
 

@@ -1,0 +1,476 @@
+{
+  "startedAt": "2026-08-06T12:35:27.011737-05:00",
+  "config": {
+    "TaskCount": 50000,
+    "WaveSize": 2000,
+    "TaskNumCPUs": "0.2",
+    "Compression": false,
+    "RotationIntvl": "",
+    "WorkerMemLimit": "",
+    "KindNode": "bench-control-plane",
+    "HeadStatusBuffer": "",
+    "DrainSleepSec": 20,
+    "S3LocalPort": 9002,
+    "JobTimeout": 2700000000000,
+    "WarmIterations": 10,
+    "HSCPULimit": "500m",
+    "HSEnv": "GODEBUG=gctrace=1",
+    "HSEnterTimeout": 300000000000,
+    "HSWarmWait": 900000000000,
+    "OutDir": "/Users/future-outlier/code/ray-project/kuberay/.claude/worktrees/benchmark/historyserver/test/benchmark/out/sweep-122341/B1-gctrace-500m-n50k",
+    "SkipCleanup": false
+  },
+  "env": {
+    "nodes": [
+      {
+        "name": "bench-control-plane",
+        "kubeletVersion": "v1.33.1",
+        "osImage": "Debian GNU/Linux 12 (bookworm)",
+        "cpu": "14",
+        "memory": "32813556Ki"
+      }
+    ]
+  },
+  "sessionID": "session_2026-08-06_10-35-28_835361_1",
+  "job": {
+    "wallClock": 50042407584,
+    "driverTasks": 50000,
+    "driverWallSec": 18.25,
+    "driverRateTPS": 2739.6
+  },
+  "flushDuration": 3034695041,
+  "collectorLogs": [
+    {
+      "pod": "raycluster-historyserver-cpu-worker-8dr88",
+      "uploads": 1,
+      "uploadedBytes": 66270757,
+      "diskPressure503s": 0,
+      "rotationQueueFull": 0,
+      "uploadFailures": 0,
+      "uploadTimeline": [
+        {
+          "time": "2026-08-06T17:36:39Z",
+          "bytes": 66270757
+        }
+      ]
+    },
+    {
+      "pod": "raycluster-historyserver-head-k7jpc",
+      "uploads": 5,
+      "uploadedBytes": 91686126,
+      "diskPressure503s": 0,
+      "rotationQueueFull": 0,
+      "uploadFailures": 0,
+      "uploadTimeline": [
+        {
+          "time": "2026-08-06T17:36:38Z",
+          "bytes": 12810
+        },
+        {
+          "time": "2026-08-06T17:36:38Z",
+          "bytes": 7079
+        },
+        {
+          "time": "2026-08-06T17:36:38Z",
+          "bytes": 1217
+        },
+        {
+          "time": "2026-08-06T17:36:38Z",
+          "bytes": 20927
+        },
+        {
+          "time": "2026-08-06T17:36:39Z",
+          "bytes": 91644093
+        }
+      ]
+    }
+  ],
+  "storageDiffs": [
+    {
+      "label": "during-job (T1-T0)",
+      "addedObjects": 0,
+      "addedBytes": 0,
+      "changedObjects": 0,
+      "changedBytes": 0,
+      "deletedObjects": 0,
+      "unexpectedKeys": null
+    },
+    {
+      "label": "flush (T2-T1)",
+      "addedObjects": 172,
+      "addedBytes": 160580895,
+      "changedObjects": 0,
+      "changedBytes": 0,
+      "deletedObjects": 0,
+      "unexpectedKeys": null
+    }
+  ],
+  "storage": {
+    "totalBytes": 160581370,
+    "objectCount": 173,
+    "categories": {
+      "fetched_endpoints": 475,
+      "job_events": 157949804,
+      "logs": 2624012,
+      "node_events": 7079
+    },
+    "markerPresent": true,
+    "events": {
+      "countByType": {
+        "ACTOR_DEFINITION_EVENT": 2,
+        "ACTOR_LIFECYCLE_EVENT": 5,
+        "ACTOR_TASK_DEFINITION_EVENT": 2,
+        "DRIVER_JOB_DEFINITION_EVENT": 1,
+        "DRIVER_JOB_LIFECYCLE_EVENT": 2,
+        "NODE_DEFINITION_EVENT": 2,
+        "NODE_LIFECYCLE_EVENT": 2,
+        "TASK_DEFINITION_EVENT": 50005,
+        "TASK_LIFECYCLE_EVENT": 117481,
+        "TASK_PROFILE_EVENT": 50059
+      },
+      "totalEvents": 217561,
+      "taskScopedEvents": 217547,
+      "rawJSONLBytes": 157956883,
+      "storedEventBytes": 157956883,
+      "distinctTaskDefIDs": 50005,
+      "benchJobID": "03000000",
+      "benchJobTaskIDs": 50001,
+      "expectedTasks": 50000,
+      "eventsPerTask": 4.35094,
+      "avgRawBytesPerEvent": 726.0349189422736,
+      "compressionRatio": 1,
+      "perNode": [
+        {
+          "nodeID": "d495e66ded99835cca9580bc614596be120612aee558c565538bd030",
+          "events": 117517,
+          "rawBytes": 91686126,
+          "distinctTaskIDs": 50007,
+          "peak1sEvents": 9245,
+          "peak10sEventsPerSec": 7294.6,
+          "countByType": {
+            "ACTOR_DEFINITION_EVENT": 2,
+            "ACTOR_LIFECYCLE_EVENT": 5,
+            "ACTOR_TASK_DEFINITION_EVENT": 2,
+            "DRIVER_JOB_DEFINITION_EVENT": 1,
+            "DRIVER_JOB_LIFECYCLE_EVENT": 2,
+            "NODE_DEFINITION_EVENT": 2,
+            "NODE_LIFECYCLE_EVENT": 2,
+            "TASK_DEFINITION_EVENT": 50005,
+            "TASK_LIFECYCLE_EVENT": 67445,
+            "TASK_PROFILE_EVENT": 51
+          }
+        },
+        {
+          "nodeID": "3b1a69349976f4e0d91599a374b8e6bf26761dd5bf6a1ba512700d49",
+          "events": 100044,
+          "rawBytes": 66270757,
+          "distinctTaskIDs": 50000,
+          "peak1sEvents": 7573,
+          "peak10sEventsPerSec": 6223,
+          "countByType": {
+            "TASK_LIFECYCLE_EVENT": 50036,
+            "TASK_PROFILE_EVENT": 50008
+          }
+        }
+      ]
+    }
+  },
+  "historyServer": {
+    "listClusters": {
+      "endpoint": "/clusters",
+      "p50": 25144417,
+      "p95": 139354417,
+      "max": 139354417,
+      "lastBytes": 208,
+      "errors": 0
+    },
+    "enterColdLatency": 84914006208,
+    "enterStatus": 200,
+    "warmEndpoints": [
+      {
+        "endpoint": "/api/v0/tasks?limit=50000",
+        "p50": 0,
+        "p95": 0,
+        "max": 0,
+        "lastBytes": 0,
+        "errors": 10
+      },
+      {
+        "endpoint": "/api/v0/tasks/summarize",
+        "p50": 2209347958,
+        "p95": 2299956375,
+        "max": 2299956375,
+        "lastBytes": 408,
+        "errors": 0
+      },
+      {
+        "endpoint": "/api/jobs/",
+        "p50": 65537375,
+        "p95": 769748083,
+        "max": 769748083,
+        "lastBytes": 1341,
+        "errors": 0
+      },
+      {
+        "endpoint": "/nodes?view=summary",
+        "p50": 326026792,
+        "p95": 505191833,
+        "max": 505191833,
+        "lastBytes": 2836,
+        "errors": 0
+      },
+      {
+        "endpoint": "/events",
+        "p50": 85726458,
+        "p95": 664667375,
+        "max": 664667375,
+        "lastBytes": 2177,
+        "errors": 0
+      }
+    ],
+    "gc": {
+      "cycles": 33,
+      "finalPercent": 8,
+      "peakHeapMB": 816,
+      "gomaxprocs": 2
+    },
+    "notes": null
+  },
+  "resources": [
+    {
+      "class": "collector (head)",
+      "phase": "flush",
+      "samples": 1,
+      "peakWorkingSetMiB": 95.27734375,
+      "avgCores": 0,
+      "peakCores": 0
+    },
+    {
+      "class": "collector (head)",
+      "phase": "job",
+      "samples": 50,
+      "peakWorkingSetMiB": 128.0859375,
+      "avgCores": 0.34670935416666665,
+      "peakCores": 0.6860732857142857
+    },
+    {
+      "class": "collector (worker)",
+      "phase": "flush",
+      "samples": 1,
+      "peakWorkingSetMiB": 87.48046875,
+      "avgCores": 0,
+      "peakCores": 0
+    },
+    {
+      "class": "collector (worker)",
+      "phase": "job",
+      "samples": 50,
+      "peakWorkingSetMiB": 110.18359375,
+      "avgCores": 0.28455031707317074,
+      "peakCores": 0.5324877333333333
+    },
+    {
+      "class": "historyserver",
+      "phase": "historyserver",
+      "samples": 113,
+      "peakWorkingSetMiB": 1225.5703125,
+      "avgCores": 0.496478801980198,
+      "peakCores": 0.525281
+    },
+    {
+      "class": "ray-head",
+      "phase": "job",
+      "samples": 50,
+      "peakWorkingSetMiB": 3152.859375,
+      "avgCores": 0.5750717346938775,
+      "peakCores": 0.8013590625
+    },
+    {
+      "class": "ray-worker",
+      "phase": "job",
+      "samples": 50,
+      "peakWorkingSetMiB": 934.4296875,
+      "avgCores": 0.9074552888888889,
+      "peakCores": 1.7504302142857142
+    }
+  ],
+  "cgroups": [
+    {
+      "container": "historyserver-demo-6785ff6464-z75nr/historyserver",
+      "phase": "historyserver",
+      "samples": 108,
+      "peakAnonMiB": 1015.37109375,
+      "peakCurrentMiB": 1307.484375,
+      "avgCores": 0.4947920467117888,
+      "peakCores": 0.5320823062071424
+    },
+    {
+      "container": "historyserver-demo-6785ff6464-z75nr/historyserver",
+      "phase": "lifetime",
+      "samples": 0,
+      "peakAnonMiB": 0,
+      "peakCurrentMiB": 0,
+      "avgCores": 0,
+      "peakCores": 0,
+      "lifetimePeakMiB": 1312.24609375
+    },
+    {
+      "container": "raycluster-historyserver-cpu-worker-8dr88/collector",
+      "phase": "baseline",
+      "samples": 1,
+      "peakAnonMiB": 52.625,
+      "peakCurrentMiB": 53.4453125,
+      "avgCores": 0,
+      "peakCores": 0
+    },
+    {
+      "container": "raycluster-historyserver-cpu-worker-8dr88/collector",
+      "phase": "flush",
+      "samples": 1,
+      "peakAnonMiB": 84.8125,
+      "peakCurrentMiB": 150.94921875,
+      "avgCores": 0,
+      "peakCores": 0
+    },
+    {
+      "container": "raycluster-historyserver-cpu-worker-8dr88/collector",
+      "phase": "job",
+      "samples": 47,
+      "peakAnonMiB": 112.72265625,
+      "peakCurrentMiB": 167.00390625,
+      "avgCores": 0.24192552531658126,
+      "peakCores": 1.0598094315391098
+    },
+    {
+      "container": "raycluster-historyserver-cpu-worker-8dr88/collector",
+      "phase": "lifetime",
+      "samples": 0,
+      "peakAnonMiB": 0,
+      "peakCurrentMiB": 0,
+      "avgCores": 0,
+      "peakCores": 0,
+      "lifetimePeakMiB": 174.59765625
+    },
+    {
+      "container": "raycluster-historyserver-cpu-worker-8dr88/ray-worker",
+      "phase": "baseline",
+      "samples": 1,
+      "peakAnonMiB": 269.17578125,
+      "peakCurrentMiB": 288.0390625,
+      "avgCores": 0,
+      "peakCores": 0
+    },
+    {
+      "container": "raycluster-historyserver-cpu-worker-8dr88/ray-worker",
+      "phase": "job",
+      "samples": 47,
+      "peakAnonMiB": 971.24609375,
+      "peakCurrentMiB": 1008.07421875,
+      "avgCores": 0.8478817353285825,
+      "peakCores": 2.1090335351633995
+    },
+    {
+      "container": "raycluster-historyserver-cpu-worker-8dr88/ray-worker",
+      "phase": "lifetime",
+      "samples": 0,
+      "peakAnonMiB": 0,
+      "peakCurrentMiB": 0,
+      "avgCores": 0,
+      "peakCores": 0,
+      "lifetimePeakMiB": 1010.44921875
+    },
+    {
+      "container": "raycluster-historyserver-head-k7jpc/collector",
+      "phase": "baseline",
+      "samples": 1,
+      "peakAnonMiB": 57.9296875,
+      "peakCurrentMiB": 58.83984375,
+      "avgCores": 0,
+      "peakCores": 0
+    },
+    {
+      "container": "raycluster-historyserver-head-k7jpc/collector",
+      "phase": "flush",
+      "samples": 2,
+      "peakAnonMiB": 92.109375,
+      "peakCurrentMiB": 186.35546875,
+      "avgCores": 0.8701594110513408,
+      "peakCores": 0.8701594110513408
+    },
+    {
+      "container": "raycluster-historyserver-head-k7jpc/collector",
+      "phase": "job",
+      "samples": 47,
+      "peakAnonMiB": 144.02734375,
+      "peakCurrentMiB": 224.91015625,
+      "avgCores": 0.34510088317260684,
+      "peakCores": 1.1843176199261214
+    },
+    {
+      "container": "raycluster-historyserver-head-k7jpc/collector",
+      "phase": "lifetime",
+      "samples": 0,
+      "peakAnonMiB": 0,
+      "peakCurrentMiB": 0,
+      "avgCores": 0,
+      "peakCores": 0,
+      "lifetimePeakMiB": 230.19140625
+    },
+    {
+      "container": "raycluster-historyserver-head-k7jpc/ray-head",
+      "phase": "baseline",
+      "samples": 1,
+      "peakAnonMiB": 2420.76171875,
+      "peakCurrentMiB": 2472.7890625,
+      "avgCores": 0,
+      "peakCores": 0
+    },
+    {
+      "container": "raycluster-historyserver-head-k7jpc/ray-head",
+      "phase": "flush",
+      "samples": 1,
+      "peakAnonMiB": 1510.421875,
+      "peakCurrentMiB": 1547.390625,
+      "avgCores": 0,
+      "peakCores": 0
+    },
+    {
+      "container": "raycluster-historyserver-head-k7jpc/ray-head",
+      "phase": "job",
+      "samples": 47,
+      "peakAnonMiB": 3115.0703125,
+      "peakCurrentMiB": 3178.375,
+      "avgCores": 0.5834767779700707,
+      "peakCores": 2.399294369534116
+    },
+    {
+      "container": "raycluster-historyserver-head-k7jpc/ray-head",
+      "phase": "lifetime",
+      "samples": 0,
+      "peakAnonMiB": 0,
+      "peakCurrentMiB": 0,
+      "avgCores": 0,
+      "peakCores": 0,
+      "lifetimePeakMiB": 3181.0859375
+    },
+    {
+      "container": "rayjob-bench-7mt62/ray-job-submitter",
+      "phase": "job",
+      "samples": 45,
+      "peakAnonMiB": 97.625,
+      "peakCurrentMiB": 108.0390625,
+      "avgCores": 0.05884896718362937,
+      "peakCores": 0.9850136238383314
+    },
+    {
+      "container": "rayjob-bench-7mt62/ray-job-submitter",
+      "phase": "lifetime",
+      "samples": 0,
+      "peakAnonMiB": 0,
+      "peakCurrentMiB": 0,
+      "avgCores": 0,
+      "peakCores": 0,
+      "lifetimePeakMiB": 110.91796875
+    }
+  ]
+}

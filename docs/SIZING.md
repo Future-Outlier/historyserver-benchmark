@@ -159,12 +159,22 @@ If your sessions are large, cap the blast radius instead of buying RAM:
 
 ### Timeouts — and where the wall really is
 
-With adequate CPU the default `--session-process-timeout` of 2 minutes covers
-roughly **190,000 tasks** (at 0.62 ms/task), so it stops being the binding
-constraint. What binds instead is the HTTP server's hardcoded 35 s
-`WriteTimeout`: a load longer than that cannot deliver *any* response — success
-or error — to an HTTP/1 client, which puts the practical ceiling at about
-**56,000 tasks** even on a fast server. That one needs a code change; see
+This is the ceiling that actually stops people, and crossing it does not make a
+session slow — it makes it **unopenable**, because the load is aborted at the
+timeout and every retry starts over.
+
+```
+tasks that fit = --session-process-timeout / per-task cost
+   500m, ~1.7 ms/task  ->  ~70,000     (100k confirmed never to complete)
+   2-4 cores, 0.63 ms  ->  ~190,000    (200k confirmed never to complete)
+```
+
+Both ends were confirmed by runs that never returned. So raise the flag together
+with the CPU limit: CPU alone just moves the wall.
+
+The HTTP server's hardcoded 35 s `WriteTimeout` binds even earlier for the
+*client* — about 56,000 tasks at 0.63 ms/task — but the server-side cache is
+still populated, so a later request succeeds. That one needs a code change; see
 [FINDINGS.md](FINDINGS.md).
 
 ```
@@ -189,8 +199,11 @@ total:        (above) × D sessions retained
 | 1,000 jobs × 10k tasks | 31 GiB | 2.8 GiB |
 | 100 jobs × 100k tasks | 31 GiB | 2.8 GiB |
 
-**Turn compression on.** It saves 91% and cost nothing measurable in CPU or load
-time in these runs.
+**Turn compression on, but know what it costs.** It saves 91% of storage and
+costs nothing on the collector side, but a compressed session takes about **21%
+longer to cold-load** (100k tasks: 78.6 s vs 64.8 s at 4 cores). Storage is
+usually the scarcer resource, so this is still the right default — just not a
+free one.
 
 ```yaml
 env:
@@ -206,7 +219,7 @@ event bytes** arrived only during the shutdown flush. If a Ray pod is SIGKILLed
 (node failure, grace period too short, OOM), that data — and the session marker
 that makes the session listable — is gone.
 
-If your jobs are short and you care about surviving abrupt termination:
+The obvious mitigation is a shorter rotation interval:
 
 ```yaml
 env:
@@ -214,9 +227,12 @@ env:
     value: "1m"
 ```
 
-and give Ray pods a `terminationGracePeriodSeconds` long enough for the final
-upload (the flush itself took 1–4 s in these runs; the constraint is the upload,
-which scales with the un-uploaded backlog).
+We tested it at 50k and it changed nothing — still 0 bytes uploaded during the
+job — because that job runs ~40 s and no file ever gets old enough to rotate.
+**It can only help jobs that outlive the interval**, which we did not test. What
+definitely matters either way is a `terminationGracePeriodSeconds` long enough
+for the final upload; the flush itself took 1–4 s in these runs, and the
+constraint is the upload of whatever backlog is on disk.
 
 ---
 
