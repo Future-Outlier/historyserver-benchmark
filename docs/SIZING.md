@@ -147,11 +147,20 @@ The cache holds up to `--session-cache-size` sessions (default 100) with no TTL
 unless you set `--session-cache-ttl`. **The memory you must budget is not one
 session — it is every session a user might open before eviction.**
 
+```
+one session resident  >=  400 MiB + N x 20 KiB     (cgroup total, what a limit sees)
+```
+
 | Largest session | One session loaded | Safe limit (a few sessions cached) |
 |---:|---|---|
-| 10,000 tasks | ~290 MiB | `1Gi` |
-| 50,000 tasks | ~1.1 GiB | `4Gi` |
+| 10,000 tasks | ~0.3 GiB | `1Gi` |
+| 50,000 tasks | ~1.3 GiB | `4Gi` |
 | 100,000 tasks | ~2.2 GiB | `8Gi` |
+| 200,000 tasks | ~2.9 GiB | `12Gi` |
+
+Per-task cost falls as sessions get bigger (a ~90 MiB floor is amortized): about
+30 KiB/task at 10k, 25 at 50k, 21 at 100k, 15 at 200k. The formula above is the
+upper bound that covers all of them.
 
 ```yaml
 resources:

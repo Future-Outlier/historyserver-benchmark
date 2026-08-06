@@ -118,6 +118,50 @@ mirroring Ray's dashboard API), so the task list is always paginated.
 is 1.88–2.28 ms/task up to 50k and then 9.07 ms/task at 100k; the difference is
 the quota, not the data.
 
+### Memory to load one RayCluster session
+
+Peak while a single session is loaded and served, across every measured run
+(ranges are run-to-run spread at the same size, excluding the `GOGC` arms):
+
+| Tasks in session | Go heap | cgroup anon | cgroup total | total per task |
+|---:|---:|---:|---:|---:|
+| 1,000 | — | 95–98 MiB | 99–104 MiB | ~100 KiB |
+| 5,000 | — | 165–197 MiB | 187–199 MiB | ~38 KiB |
+| 10,000 | — | 224–294 MiB | 274–322 MiB | ~30 KiB |
+| 20,000 | — | 467–510 MiB | 512–543 MiB | ~26 KiB |
+| 50,000 | 729–954 MB | 949–1,246 MiB | 1,067–1,314 MiB | ~25 KiB |
+| 100,000 | 1,103–1,398 MB | 1,483–1,762 MiB | 1,827–2,181 MiB | ~21 KiB |
+| 200,000 | 2,115 MB | 2,263 MiB | 2,875 MiB | ~15 KiB |
+
+Three numbers because they answer different questions. **Go heap** (from
+`GODEBUG=gctrace=1`) is what the decoded session actually costs. **anon** is
+what the container's anonymous memory reaches, about 1.2–1.3× the heap.
+**cgroup total** includes page cache from reading the objects and is what a
+`limits.memory` and the eviction path actually see — so that is the column to
+size against.
+
+Per-task cost *falls* with session size (100 KiB/task at 1k down to 15 KiB at
+200k) because a ~90 MiB floor is being amortized. A single upper bound that
+holds across every size measured:
+
+```
+memory limit  >=  400 MiB + N x 20 KiB
+   50k -> 1.4 GiB     100k -> 2.4 GiB     200k -> 4.3 GiB
+```
+
+That is for **one** session resident. The snapshot cache holds up to
+`--session-cache-size` (default 100) with no TTL, so a server that people
+actually browse can hold many of these at once — see [SIZING.md](SIZING.md).
+
+> **Why this model ignores every event type except task events.** In the 50k
+> session the bucket held 218,200 task-series events against **14** of
+> everything else combined — two node definitions, two node lifecycles, one
+> driver-job definition, two driver-job lifecycles, and a handful of actor
+> events. Non-task events are 0.006% of the total, so both the memory and the
+> load-time models are written per *task* and simply drop them. That stays true
+> for any workload with more than a few hundred tasks; it would not hold for a
+> cluster that mostly runs actors with very few method calls.
+
 ### Is the runtime's automatic tuning already right? Yes.
 
 At a fixed `limits.cpu: 2` and 100k tasks, overriding what Go picks for itself

@@ -15,7 +15,8 @@ events   E ≈ N × 4.36              1 definition + 2.36 lifecycle + 1 profile 
 storage  S ≈ N × 3.15 KiB          raw   →   N × 0.29 KiB with gzip (91% smaller)
 HS load  T ≈ N × 0.6 ms            at 2+ cores   →   N × 1.5 ms at the shipped 500m
                                    linear at both, measured from 1k to 200k tasks
-HS RSS   M ≈ 100 MiB + N × 23 KiB  per session held in the snapshot cache
+HS RSS   M ≈ 400 MiB + N × 20 KiB  per session held in the snapshot cache
+                                   (100k ≈ 2.2 GiB, 200k ≈ 2.9 GiB measured)
 opens?   N < timeout / per-task    ~79k tasks at 500m, ~200k at 2+ cores — past that
                                    the load is aborted and retried forever
 ```
@@ -142,11 +143,19 @@ Two other things sit on this path regardless of CPU: a hardcoded 35 s HTTP
 outlive, and ~436,000 INFO log lines per 100k-task load (removing them bought
 13%). See [docs/FINDINGS.md](docs/FINDINGS.md).
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-memory-dark.svg"><img alt="History Server peak heap: 184 MiB at 5k tasks up to 2.2 GiB at 100k tasks" src="docs/img/hs-memory-light.svg"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-memory-dark.svg"><img alt="Memory to load one session: 102 MiB at 1k tasks rising to 2.9 GiB at 200k, with Go heap consistently below the cgroup total" src="docs/img/hs-memory-light.svg"></picture>
 
-**~23 KiB of heap per task**, retained: the snapshot is a fully materialized
-`[]map[string]any` kept in an LRU of up to 100 sessions with no TTL by default.
-Budget for every session a user might open, not for one.
+Loading one session costs about **400 MiB + 20 KiB per task** of container
+memory — 1.3 GiB at 50k tasks, 2.2 GiB at 100k, 2.9 GiB at 200k — and the
+snapshot stays in an LRU of up to 100 sessions with no TTL by default, so budget
+for every session a user might open, not for one. Per-task cost falls as
+sessions grow because a ~90 MiB floor is amortized; the table with Go heap,
+anonymous memory and cgroup total side by side is in
+[docs/RESULTS.md](docs/RESULTS.md).
+
+Note this model counts **tasks only**. In the 50k session, task-series events
+outnumbered every other event type combined by 218,200 to 14, so node, job and
+actor-lifecycle events are simply dropped from the arithmetic.
 
 > **Every load time above was measured under a 500m CPU limit** — the value
 > `historyserver/config/historyserver.yaml` ships. The container sat at

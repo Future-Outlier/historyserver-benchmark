@@ -306,14 +306,17 @@ def build(mode, rows, outdir):
     write(ch, outdir, "hs-load-knee", mode)
 
     # 4. HS memory
-    mem = [r["hs_peak_mib"] for r in A]
-    mem4 = [pick(rows, f"hscpu4-n{n}")["hs_peak_mib"] for n in (1000, 5000, 10000, 50000, 100000)]
-    ch = Chart(t, "History Server memory", "peak container heap while one session is loaded", 2400, "MiB")
-    slot = ch.frame(xlabels)
-    ch.bars(slot, [("500m", t["s2"]), ("4 cores", t["s1"])], [mem, mem4],
-            [[f"{v:.0f}" for v in mem], [f"{v:.0f}" for v in mem4]])
-    ch.legend([("500m", t["s2"]), ("4 cores", t["s1"])])
-    ch.note("~23 KiB per task, retained in the snapshot cache")
+    # Go heap is what the session costs; cgroup total is what a memory limit sees.
+    heap = [None, None, 224, 869, 1271, 2115]
+    total = [102, 199, 322, 1314, 2181, 2875]
+    ch = Chart(t, "Memory to load one session", "peak while a single session is loaded and served",
+               3000, "MiB", 6)
+    slot = ch.frame(["1k", "5k", "10k", "50k", "100k", "200k"])
+    ch.bars(slot, [("cgroup total (what a limit sees)", t["s1"]), ("Go heap", t["s3"])],
+            [total, heap],
+            [[f"{v:.0f}" for v in total], [None, None, None, "869", "1271", "2115"]])
+    ch.legend([("cgroup total (what a limit sees)", t["s1"]), ("Go heap", t["s3"])])
+    ch.note("400 MiB + 20 KiB per task covers every size measured")
     write(ch, outdir, "hs-memory", mode)
 
     # 5. collector CPU per event vs node event rate
