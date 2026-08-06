@@ -288,6 +288,7 @@ Full derivation and worked examples: **[docs/SIZING.md](docs/SIZING.md)**.
 
 | Doc | Contents |
 |---|---|
+| [docs/EXPERIMENT-LOG.md](docs/EXPERIMENT-LOG.md) | **All eleven campaigns in the order they happened** — what was believed going in, what each run showed, what it killed |
 | [docs/SIZING.md](docs/SIZING.md) | Decide your own resource requests — formulas, tables, checklist |
 | [docs/RESULTS.md](docs/RESULTS.md) | Every measurement with the numbers behind these charts |
 | [docs/FINDINGS.md](docs/FINDINGS.md) | Bugs and design limits found, with source references |
