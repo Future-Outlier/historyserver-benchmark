@@ -81,17 +81,26 @@ class Chart:
         lo, hi = self.yd
         return H - PAD_B - (math.log10(v) - lo) / (hi - lo) * (H - PAD_T - PAD_B)
 
-    def line(self, pts, color, labels=None):
+    def xtick(self, value, label):
+        self.parts.append(f'<text x="{self.lx(value):.1f}" y="{H - PAD_B + 20:.1f}" '
+                          f'text-anchor="end" font-family="{FONT}" font-size="12" '
+                          f'fill="{self.t["ink2"]}">{html.escape(label)}</text>')
+
+    def line(self, pts, color, labels=None, dashed=False):
         d = " ".join(f"{'M' if i == 0 else 'L'}{self.lx(x):.1f},{self.ly(y):.1f}"
                      for i, (x, y) in enumerate(pts))
+        dash = ' stroke-dasharray="5 4" opacity="0.75"' if dashed else ''
         self.parts.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="2" '
-                          f'stroke-linejoin="round"/>')
+                          f'stroke-linejoin="round"{dash}/>')
         for i, (x, y) in enumerate(pts):
             self.parts.append(f'<circle cx="{self.lx(x):.1f}" cy="{self.ly(y):.1f}" r="4.5" '
                               f'fill="{color}" stroke="{self.t["surface"]}" stroke-width="2"/>')
             if labels and labels[i]:
-                self.parts.append(f'<text x="{self.lx(x):.1f}" y="{self.ly(y) - 12:.1f}" '
-                                  f'text-anchor="middle" font-family="{FONT}" font-size="11" '
+                # keep the last label inside the frame instead of centring it on the point
+                px = self.lx(x)
+                anchor = "end" if px > W - PAD_R - 40 else "middle"
+                self.parts.append(f'<text x="{px:.1f}" y="{self.ly(y) - 12:.1f}" '
+                                  f'text-anchor="{anchor}" font-family="{FONT}" font-size="11" '
                                   f'fill="{self.t["ink"]}">{html.escape(labels[i])}</text>')
 
     def frame(self, xlabels):
@@ -260,22 +269,28 @@ def build(mode, rows, outdir):
     ch.note("3.15 KiB -> 0.29 KiB  (91% saved)")
     write(ch, outdir, "storage-per-task", mode)
 
-    # 3. The scaling curve, with the server-side timeout raised so every point is
-    # a completed load. Log-log: a straight line means linear in task count.
-    N500 = [1000, 5000, 10000, 20000, 50000, 100000]
-    s500 = [2.28, 9.83, 19.86, 37.60, 76.30, 151.30]
+    # 3. The scaling curve, with the server-side timeout raised so every point is a
+    # completed load. Log-log: a straight line means linear in task count. The
+    # 500m points below 50k come from the build that still logged per event, so
+    # they sit ~25% high and are drawn as a separate dashed series rather than
+    # silently joined to the rest.
+    N_pre = [1000, 5000, 10000, 20000]
+    s_pre = [2.28, 9.83, 19.86, 37.60]
+    N500, s500 = [50000, 100000], [76.30, 151.30]
     N4 = [1000, 5000, 10000, 20000, 50000, 100000, 200000]
     s4 = [0.69, 3.17, 6.25, 14.45, 30.52, 64.80, 119.90]
     ch = Chart(t, "History Server cold load vs session size",
                "GET /enter_cluster, log-log: a straight line means cost scales linearly with tasks",
                1, "seconds (log scale)")
-    ch.logframe((3, 5.31), (-1, 3),
-                lambda v: {1e3: "1k", 1e4: "10k", 1e5: "100k tasks"}[v],
+    ch.logframe((3, 5.301), (-1, 3),
+                lambda v: {1e3: "1k", 1e4: "10k", 1e5: "100k"}[v],
                 lambda v: {0.1: "0.1", 1.0: "1", 10.0: "10", 100.0: "100", 1000.0: "1,000"}[v])
-    ch.line(list(zip(N500, s500)), t["s2"], [None] * 5 + ["151s"])
-    ch.line(list(zip(N4, s4)), t["s1"], [None] * 6 + ["120s"])
-    ch.legend([("500m: 1.5 ms/task", t["s2"]), ("4 cores: 0.6 ms/task", t["s1"])])
-    ch.note("both straight: no cliff anywhere, only a different constant", y=H - 13)
+    ch.xtick(200000, "200k tasks")
+    ch.line(list(zip(N_pre, s_pre)), t["s2"], dashed=True)
+    ch.line(list(zip(N500, s500)), t["s2"], [None, "100k: 151s"])
+    ch.line(list(zip(N4, s4)), t["s1"], [None] * 6 + ["200k: 120s"])
+    ch.legend([("500m", t["s2"]), ("2-4 cores", t["s1"])])
+    ch.note("dashed: same limit, earlier build that logged per event", y=H - 13)
     write(ch, outdir, "hs-load", mode)
 
     # 4. The headline: 100k, where the gap stops being a gap.

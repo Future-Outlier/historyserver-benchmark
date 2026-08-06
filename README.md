@@ -140,15 +140,22 @@ limit to 4 with `GOMAXPROCS` pinned to 1 still loads 100k in 76.3 s. **The CFS
 quota is the binding constraint; Go parallelism is worth about 1.2×.** Measured
 GC share backs this up: 8% of CPU at `500m`, 1–2% at 4 cores.
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Log-log scaling curve: at 4 cores cold load is a straight line from 0.69s at 1k tasks to 62.7s at 100k; the 500m series stops at 50k because 100k never completed" src="docs/img/hs-load-light.svg"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Log-log scaling curve: both CPU limits produce straight lines, 1.5 ms per task at 500m and 0.6 at 2-4 cores, with the pre-logging-fix 500m points drawn dashed" src="docs/img/hs-load-light.svg"></picture>
 
-On log-log axes a straight line means the cost scales linearly with task count.
-The 4-core series is straight across two orders of magnitude. The 500m series
-tracks it up to 50k and then stops: at 100k that configuration never returned a
-response, so there is no point to plot. The server's own
-`--session-process-timeout` (2 minutes by default) aborts a load that long and
-the next attempt starts from scratch, so "how slow is it really" is a question
-this configuration cannot answer without raising that flag.
+On log-log axes a straight line means the cost scales linearly with task count,
+and both configurations are straight — they differ only in the constant.
+
+Read the orange series carefully. The **dashed** part is the same `500m` limit
+measured on an earlier build that still logged once per event, so those four
+points sit about 25% high (1.8–2.3 ms/task) relative to the solid pair
+(1.51–1.53 ms/task). They are drawn separately rather than joined, because a
+line through both would attribute a build difference to scaling.
+
+The 100k and 200k points also needed `--session-process-timeout` raised to be
+measurable at all: under the 2-minute default those loads are aborted and every
+retry starts over. One caveat on the 200k point — that run stored 187,743 of
+200,000 task definitions, so its 0.60 ms/task is 0.64 if you divide by what was
+actually stored.
 
 Two other things sit on this path regardless of CPU: a hardcoded 35 s HTTP
 `WriteTimeout` that is *shorter* than the 2-minute load timeout it should
