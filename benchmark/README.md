@@ -61,6 +61,7 @@ Without `BENCH_RUN=1` the test skips immediately, so `go test ./...` stays fast.
 | `BENCH_RAY_STATUS_BUFFER_HEAD` | (Ray default, 100000) | Sets `RAY_task_events_max_num_status_events_buffer_on_worker` on the **head** Ray container only — the buffer the task owner drains at exit. (`RAY_ray_event_recorder_max_queued_events` is a different, GCS-side buffer and does not affect this path.) |
 | `BENCH_DRIVER_DRAIN_SLEEP` | `10` | Seconds the driver sleeps after the last wave so the owner's status-event buffer drains before the process exits |
 | `BENCH_S3_LOCAL_PORT` | `9002` | Local port for the benchmark's own MinIO port-forward; deliberately not 9000, which e2e suites fight over |
+| `BENCH_HS_CPU_LIMIT` | (manifest default, `500m`) | Rewrites the history server manifest's CPU limit for the run. The shipped 500m is saturated for the whole cold load |
 | `BENCH_HS_ENTER_TIMEOUT` | `5m` | Client budget for the first `/enter_cluster` attempt |
 | `BENCH_HS_WARM_WAIT` | `15m` | After a timed-out first attempt, keep re-probing (the server-side load keeps running); the first warm hit upper-bounds the true load time |
 | `BENCH_KIND_NODE` | `kind-control-plane` | kind node container name for the cgroup sampler |

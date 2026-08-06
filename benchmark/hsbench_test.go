@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +33,30 @@ type HSBenchResult struct {
 	EnterStatus      int             `json:"enterStatus"`
 	WarmEndpoints    []EndpointStats `json:"warmEndpoints"` // snapshot-backed reads after the cold load
 	Notes            []string        `json:"notes"`
+}
+
+// hsManifest returns the manifest path to deploy. With BENCH_HS_CPU_LIMIT set it
+// writes a copy carrying a different CPU limit: the shipped manifest pins 500m,
+// and the cold load saturates it for its entire duration.
+func hsManifest(t *testing.T, runDir string, cfg benchConfig) string {
+	if cfg.HSCPULimit == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(HistoryServerManifestPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", HistoryServerManifestPath, err)
+	}
+	const shipped = `cpu: "500m"`
+	if strings.Count(string(raw), shipped) != 1 {
+		t.Fatalf("%s no longer contains exactly one %s; update the benchmark", HistoryServerManifestPath, shipped)
+	}
+	path := filepath.Join(runDir, "historyserver-patched.yaml")
+	patched := strings.Replace(string(raw), shipped, fmt.Sprintf("cpu: %q", cfg.HSCPULimit), 1)
+	if err := os.WriteFile(path, []byte(patched), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	t.Logf("history server CPU limit overridden: 500m -> %s", cfg.HSCPULimit)
+	return path
 }
 
 // runHSBench measures the three user-facing costs: listing clusters, cold

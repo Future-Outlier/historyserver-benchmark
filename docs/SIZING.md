@@ -63,8 +63,15 @@ far away, that headroom is what absorbs it.
 
 ```
 memory  = 100 MiB + (N_largest × 23 KiB) × (sessions held in cache)
-cpu     = 1-2 cores      (load is single-threaded and serial; more cores do not speed it up)
+cpu     = 2 cores minimum        NOT the 500m the sample manifest ships with
 ```
+
+**Raise the CPU limit first.** `historyserver/config/historyserver.yaml` sets
+`limits.cpu: "500m"` and nothing else, so Kubernetes also pins
+`requests.cpu = 500m`. Cold load is CPU-bound — JSON decode, map building, and
+GC — and the container sat at 0.42–0.50 cores for the entire load in *every*
+run: it is saturated, not comfortable. Every latency in this report was measured
+under that half-core quota.
 
 The cache holds up to `--session-cache-size` sessions (default 100) with no TTL
 unless you set `--session-cache-ttl`. **The memory you must budget is not one
@@ -79,7 +86,7 @@ session — it is every session a user might open before eviction.**
 ```yaml
 resources:
   requests: { cpu: "1", memory: 1Gi }
-  limits:   { cpu: "2", memory: 4Gi }     # for sessions up to ~50k tasks
+  limits:   { cpu: "4", memory: 4Gi }     # for sessions up to ~50k tasks
 ```
 
 If your sessions are large, cap the blast radius instead of buying RAM:
@@ -163,6 +170,7 @@ which scales with the un-uploaded backlog).
 [ ] Collector memory limit >= 512Mi (page cache from its own spool files)
 [ ] Compression enabled
 [ ] History Server memory >= 23 KiB x largest session x sessions cached
+[ ] History Server CPU limit raised above the sample manifest's 500m
 [ ] --session-process-timeout >= 2 ms x largest session, x2 safety
 [ ] Sessions kept under ~50k tasks, or load latency accepted as multi-minute
 [ ] terminationGracePeriodSeconds long enough for the final flush

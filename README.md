@@ -58,6 +58,11 @@ See [docs/FINDINGS.md](docs/FINDINGS.md).
 `[]map[string]any` kept in an LRU of up to 100 sessions with no TTL by default.
 Budget for every session a user might open, not for one.
 
+> **Every load time above was measured under a 500m CPU limit** — the value
+> `historyserver/config/historyserver.yaml` ships. The container sat at
+> 0.42–0.50 cores for the whole load in all thirteen runs, i.e. saturated.
+> Raising that limit is the first thing to try, and costs nothing but YAML.
+
 ## Collector sidecar
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/collector-cpu-dark.svg"><img alt="Collector CPU per event is a flat 115-131 microseconds across all runs and rates" src="docs/img/collector-cpu-light.svg"></picture>
@@ -89,6 +94,7 @@ replica count; only from tasks/s per node.
 | Collector CPU | `requests: R × 0.52 millicores`, `limits:` 3× that (R = sustained tasks/s **per node**) | 120 µs/event × 4.36 events/task; bursts run 2–4× the sustained average |
 | Collector memory | `requests: 128Mi`, `limits: 512Mi` | heap is flat at ~120 MiB; cgroup total incl. page cache hits 251 MiB |
 | Compression | turn it **on** | 91% smaller, no measurable cost |
+| History Server CPU | **raise it** — the sample manifest ships `limits.cpu: 500m` | cold load is CPU-bound and sat at 0.42–0.50 cores, saturated, in every run |
 | History Server memory | `100 MiB + 23 KiB × N × sessions cached` | snapshots are retained in the LRU |
 | `--session-process-timeout` | `N × 2 ms × 2` | the 2-minute default implies a ~60k-task ceiling |
 | Session size | keep under ~50k tasks | beyond that, load time degrades superlinearly |

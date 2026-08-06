@@ -51,7 +51,32 @@ Suggested fixes, cheapest first:
 - Return `202 Accepted` + a progress endpoint for loads that exceed a threshold,
   instead of holding the connection.
 
-## 2. Cold load materializes the entire session in memory, serially
+## 2. The sample manifest gives the History Server 500m of CPU, and the cold load saturates it
+
+```yaml
+# historyserver/config/historyserver.yaml:66-68
+resources:
+  limits:
+    cpu: "500m"
+```
+
+No memory limit, and half a core. Because only `limits` is set, Kubernetes also
+sets `requests.cpu = 500m`. Cold load is CPU-bound (JSON decode, map building,
+GC), so it sits at the quota for its entire duration — measured across all
+thirteen matrix runs:
+
+| run | avg cores during load | peak |
+|---|---:|---:|
+| every single one | 0.42 – 0.50 | 0.51 – 0.54 |
+
+Saturated, not "using half a core because that's all it needed". Every load
+latency in this report was therefore measured under a half-core quota, and
+anyone deploying from the sample manifest is running the same way.
+
+That makes CPU the first thing to raise before concluding the History Server is
+slow — a config-only change requiring no code and no rebuild.
+
+## 3. Cold load materializes the entire session in memory, serially
 
 ```go
 // historyserver/pkg/eventserver/eventserver.go:1141
@@ -62,7 +87,10 @@ eventList, err := DecodeEventFileBytes(eventFile, eventbytes)   // -> []map[stri
 
 Each file is read whole, then decoded whole into `[]map[string]any`, so both
 representations are live at once, and files are processed one at a time on one
-goroutine.
+goroutine. Downstream there are two more full copies: every event is
+re-marshalled from its generic map into a typed struct
+(`eventserver.go:657-678`), and the finished snapshot is deep-copied per request
+(`session_loader.go:57-62`). Four representations of the same data.
 
 **Measured:** ~2 ms and ~23 KiB of retained heap per task; 50k tasks = 98 s and
 1.1 GiB; 100k tasks = 907 s (4.6× the linear prediction) and 2.2 GiB. The
@@ -75,7 +103,7 @@ The snapshot then stays in an LRU of up to 100 sessions with no TTL by default
 Fixes worth considering: stream-decode line by line into typed structs instead of
 `map[string]any`; decode files in parallel; store a compact columnar snapshot.
 
-## 3. The cold-load path logs one INFO line per event
+## 4. The cold-load path logs one INFO line per event
 
 ```go
 // historyserver/pkg/eventserver/eventserver.go:136, inside storeEvent(),
@@ -98,7 +126,7 @@ Peak heap was unchanged (1,132 → 1,149 MiB), which is the expected signature o
 a pure CPU/IO cost rather than an allocation one. A one-line change buying 13% is
 worth taking, but it is not the explanation for the 100k knee.
 
-## 4. Defaults imply a ~60,000-task ceiling per session
+## 5. Defaults imply a ~60,000-task ceiling per session
 
 At the measured ~2 ms/task, the default 2-minute `--session-process-timeout`
 is exhausted at roughly 60,000 tasks — and in practice the 35 s `WriteTimeout`
@@ -106,7 +134,7 @@ is exhausted at roughly 60,000 tasks — and in practice the 35 s `WriteTimeout`
 nothing warns the user as a session approaches them. A session that exceeds them
 is not degraded, it is simply unopenable.
 
-## 5. Listing clusters logs an ERROR for its own placeholder objects
+## 6. Listing clusters logs an ERROR for its own placeholder objects
 
 ```go
 // historyserver/pkg/storage/s3/s3.go:171-176
@@ -127,7 +155,7 @@ ignore real errors. Same pattern in the GCS, AzureBlob, and AliyunOSS readers.
 
 Fix: skip keys ending in `/` before decoding (or stop creating the placeholder).
 
-## 6. `GET /clusters` is an uncached full scan on every request
+## 7. `GET /clusters` is an uncached full scan on every request
 
 `MaxKeys=100` pagination over the whole `cluster-metadata/` prefix, with no
 caching (`s3.go:160-181`). Cost grows with the number of sessions **ever**
@@ -135,7 +163,7 @@ stored, independent of what the user is opening. It was 5–140 ms with a handfu
 of sessions here; at thousands of retained sessions it becomes the landing page's
 latency.
 
-## 7. Short jobs upload nothing until graceful shutdown
+## 8. Short jobs upload nothing until graceful shutdown
 
 With the default 5-minute rotation interval, a job that finishes sooner has all
 its events sitting on the collector's local disk. Measured, by diffing bucket
@@ -162,7 +190,7 @@ A related known gap is already flagged in the code: on SIGTERM the History
 Server cancels in-flight loads immediately and returns 500
 (`session_loader.go:79-82`, `TODO(jiangjiawei1103)`).
 
-## 8. Compression is off by default and costs nothing
+## 9. Compression is off by default and costs nothing
 
 Not a bug, but the default looks wrong given the data: gzip cut stored bytes by
 **91%** at every scale, with CPU per event unchanged (118–125 µs vs 115–124 µs)
