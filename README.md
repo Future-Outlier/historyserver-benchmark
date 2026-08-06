@@ -112,11 +112,15 @@ against a 2.2 GiB live heap. That is probably the larger half of the 14.5×. It
 also means removing the limit outright is not free here: `GOMAXPROCS` would then
 follow the node's core count. See [docs/FINDINGS.md](docs/FINDINGS.md).
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Cold load from 1k to 50k tasks tracks the 2 ms/task line exactly under the 500m limit" src="docs/img/hs-load-light.svg"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Log-log scaling curve: at 4 cores cold load is a straight line from 0.69s at 1k tasks to 62.7s at 100k; at 500m it bends upward after 50k, reaching 907s" src="docs/img/hs-load-light.svg"></picture>
 
-Under the shipped limit the 1k–50k region is still perfectly linear, which is
-why the blowup at 100k looked like an algorithmic cliff rather than a resource
-one. Two other things sit on this path regardless of CPU: a hardcoded 35 s HTTP
+On log-log axes a straight line means the cost scales linearly with task count.
+The 4-core series is straight across two orders of magnitude; the 500m series
+tracks it until 50k and then bends. That bend is the whole story — under the
+shipped limit the linear region ends somewhere between 50k and 100k tasks, which
+is exactly where it looked like an algorithmic cliff.
+
+Two other things sit on this path regardless of CPU: a hardcoded 35 s HTTP
 `WriteTimeout` that is *shorter* than the 2-minute load timeout it should
 outlive, and ~436,000 INFO log lines per 100k-task load (removing them bought
 13%). See [docs/FINDINGS.md](docs/FINDINGS.md).

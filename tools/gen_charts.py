@@ -42,6 +42,58 @@ class Chart:
     def y(self, v):
         return H - PAD_B - (v / self.ymax) * (H - PAD_T - PAD_B)
 
+    # --- log-log mode, for scaling curves spanning several orders of magnitude ---
+
+    def logframe(self, xdecades, ydecades, xfmt, yfmt):
+        """xdecades/ydecades are (min_exp, max_exp) powers of ten."""
+        import math
+        t = self.t
+        self.xd, self.yd = xdecades, ydecades
+        out = [f'<rect width="{W}" height="{H}" fill="{t["surface"]}" rx="8"/>',
+               f'<text x="{PAD_L - 46}" y="26" font-family="{FONT}" font-size="16" '
+               f'font-weight="600" fill="{t["ink"]}">{html.escape(self.title)}</text>',
+               f'<text x="{PAD_L - 46}" y="44" font-family="{FONT}" font-size="12" '
+               f'fill="{t["muted"]}">{html.escape(self.subtitle)}</text>',
+               f'<text x="{PAD_L - 46}" y="66" font-family="{FONT}" font-size="11" '
+               f'fill="{t["muted"]}">{html.escape(self.ylabel)}</text>']
+        for e in range(ydecades[0], ydecades[1] + 1):
+            y = self.ly(10.0 ** e)
+            out.append(f'<line x1="{PAD_L}" y1="{y:.1f}" x2="{W - PAD_R}" y2="{y:.1f}" '
+                       f'stroke="{t["grid"]}" stroke-width="1"/>')
+            out.append(f'<text x="{PAD_L - 8}" y="{y + 4:.1f}" text-anchor="end" font-family="{FONT}" '
+                       f'font-size="11" fill="{t["muted"]}">{yfmt(10.0 ** e)}</text>')
+        for e in range(xdecades[0], xdecades[1] + 1):
+            x = self.lx(10.0 ** e)
+            anchor = "end" if e == xdecades[1] else ("start" if e == xdecades[0] else "middle")
+            out.append(f'<text x="{x:.1f}" y="{H - PAD_B + 20:.1f}" text-anchor="{anchor}" '
+                       f'font-family="{FONT}" font-size="12" fill="{t["ink2"]}">{xfmt(10.0 ** e)}</text>')
+        out.append(f'<line x1="{PAD_L}" y1="{H - PAD_B}" x2="{W - PAD_R}" y2="{H - PAD_B}" '
+                   f'stroke="{t["axis"]}" stroke-width="1"/>')
+        self.parts = out
+
+    def lx(self, v):
+        import math
+        lo, hi = self.xd
+        return PAD_L + (math.log10(v) - lo) / (hi - lo) * (W - PAD_L - PAD_R)
+
+    def ly(self, v):
+        import math
+        lo, hi = self.yd
+        return H - PAD_B - (math.log10(v) - lo) / (hi - lo) * (H - PAD_T - PAD_B)
+
+    def line(self, pts, color, labels=None):
+        d = " ".join(f"{'M' if i == 0 else 'L'}{self.lx(x):.1f},{self.ly(y):.1f}"
+                     for i, (x, y) in enumerate(pts))
+        self.parts.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="2" '
+                          f'stroke-linejoin="round"/>')
+        for i, (x, y) in enumerate(pts):
+            self.parts.append(f'<circle cx="{self.lx(x):.1f}" cy="{self.ly(y):.1f}" r="4.5" '
+                              f'fill="{color}" stroke="{self.t["surface"]}" stroke-width="2"/>')
+            if labels and labels[i]:
+                self.parts.append(f'<text x="{self.lx(x):.1f}" y="{self.ly(y) - 12:.1f}" '
+                                  f'text-anchor="middle" font-family="{FONT}" font-size="11" '
+                                  f'fill="{self.t["ink"]}">{html.escape(labels[i])}</text>')
+
     def frame(self, xlabels):
         t = self.t
         out = [
@@ -206,19 +258,24 @@ def build(mode, rows, outdir):
     ch.note("3.15 KiB -> 0.29 KiB  (91% saved)")
     write(ch, outdir, "storage-per-task", mode)
 
-    # 3. Cold load under both CPU limits, 1k-50k. 100k is excluded here because
-    # the 500m point (907s) is 9x the axis and would flatten everything else;
-    # it gets its own chart below.
-    FOUR = [pick(rows, f"hscpu4-n{n}") for n in (1000, 5000, 10000, 50000)]
-    ch = Chart(t, "History Server cold load, 1k-50k tasks",
-               "GET /enter_cluster, first open of a dead session", 110, "seconds", 5)
-    slot = ch.frame(["1k", "5k", "10k", "50k"])
-    m500 = [r["hs_cold_s"] for r in A[:3]] + [A[3]["hs_cold_s"]]
-    m4 = [r["hs_cold_s"] for r in FOUR]
-    ch.bars(slot, [("500m (shipped)", t["s2"]), ("4 cores", t["s1"])], [m500, m4],
-            [[f"{v:.1f}s" for v in m500], [f"{v:.1f}s" for v in m4]])
+    # 3. The scaling curve. Log-log because the range is 0.69s..907s: on a linear
+    # axis the small sessions vanish, which is why an earlier version of this
+    # chart simply omitted 100k.
+    N6 = [1000, 5000, 10000, 20000, 50000, 100000]
+    s500 = [2.28, 9.83, 19.86, 37.60, 97.85, 907.3]
+    s4 = [0.69, 3.17, 6.25, 14.45, 30.52, 62.67]
+    ch = Chart(t, "History Server cold load vs session size",
+               "GET /enter_cluster, log-log: a straight line means cost scales linearly with tasks",
+               1, "seconds (log scale)")
+    ch.logframe((3, 5), (-1, 3),
+                lambda v: {1e3: "1k", 1e4: "10k", 1e5: "100k tasks"}[v],
+                lambda v: {0.1: "0.1", 1.0: "1", 10.0: "10", 100.0: "100", 1000.0: "1,000"}[v])
+    ch.line(list(zip(N6, s500)), t["s2"],
+            [None, None, None, None, "97.8s", "907s"])
+    ch.line(list(zip(N6, s4)), t["s1"],
+            [None, None, None, None, "30.5s", "62.7s"])
     ch.legend([("500m (shipped)", t["s2"]), ("4 cores", t["s1"])])
-    ch.note("the gap widens with session size")
+    ch.note("4 cores stays straight; 500m bends up after 50k", y=H - 13)
     write(ch, outdir, "hs-load", mode)
 
     # 4. The headline: 100k, where the gap stops being a gap.
