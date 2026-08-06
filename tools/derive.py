@@ -15,7 +15,7 @@ MIB = 1024 * 1024
 NS = 1e-9
 
 FIELDS = [
-    "run", "tasks", "gzip", "num_cpus", "driver_tps",
+    "run", "tasks", "gzip", "num_cpus", "driver_tps", "hs_cpu_limit",
     "events_per_task", "bytes_per_event", "raw_mib", "stored_mib", "gzip_ratio",
     "raw_b_per_task", "stored_b_per_task", "logs_mib",
     "task_ids_seen", "task_ids_expected",
@@ -65,6 +65,8 @@ def row_for(path, root):
         "gzip": "on" if cfg["Compression"] else "off",
         "num_cpus": cfg["TaskNumCPUs"],
         "driver_tps": round(report["job"]["driverRateTPS"], 1),
+        # empty config value means the run used the sample manifest's 500m
+        "hs_cpu_limit": cfg.get("HSCPULimit") or "500m",
         "events_per_task": round(ev["eventsPerTask"], 3),
         "bytes_per_event": round(ev["avgRawBytesPerEvent"], 1),
         "raw_mib": round(ev["rawJSONLBytes"] / MIB, 2),

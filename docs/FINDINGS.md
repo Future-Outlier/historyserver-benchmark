@@ -69,12 +69,24 @@ thirteen matrix runs:
 |---|---:|---:|
 | every single one | 0.42 – 0.50 | 0.51 – 0.54 |
 
-Saturated, not "using half a core because that's all it needed". Every load
-latency in this report was therefore measured under a half-core quota, and
-anyone deploying from the sample manifest is running the same way.
+Saturated, not "using half a core because that's all it needed".
 
-That makes CPU the first thing to raise before concluding the History Server is
-slow — a config-only change requiring no code and no rebuild.
+**Measured, same build and cluster, only the limit changed:**
+
+| N | 500m | 4 cores | speedup |
+|---:|---:|---:|---:|
+| 50,000 | 97.9 s | 30.5 s | 3.2× |
+| 100,000 | 907.3 s | 62.7 s | **14.5×** |
+
+At 4 cores the load used 1.18 cores on average and peaked at 2.2 — the work is
+not single-threaded, because Go's GC runs concurrently and wants its own cores.
+Under a half-core quota the collector and the mutator fight for the same CPU,
+and the fight gets worse as the live heap grows, which is exactly what the
+"superlinear blowup past 50k" was: at 4 cores the per-task cost is flat again
+(0.61 ms at 50k, 0.63 ms at 100k).
+
+This is a config-only change — no code, no rebuild — and it is the highest-return
+finding in this benchmark.
 
 ## 3. Cold load materializes the entire session in memory, serially
 
@@ -92,10 +104,9 @@ re-marshalled from its generic map into a typed struct
 (`eventserver.go:657-678`), and the finished snapshot is deep-copied per request
 (`session_loader.go:57-62`). Four representations of the same data.
 
-**Measured:** ~2 ms and ~23 KiB of retained heap per task; 50k tasks = 98 s and
-1.1 GiB; 100k tasks = 907 s (4.6× the linear prediction) and 2.2 GiB. The
-superlinear knee is consistent with GC pressure from tens of millions of live
-map entries.
+**Measured:** ~23 KiB of retained heap per task, and 0.62 ms/task of load time
+once CPU is not the constraint. The allocation volume is what makes finding 2
+bite so hard: with a half core, GC has nowhere to run.
 
 The snapshot then stays in an LRU of up to 100 sessions with no TTL by default
 (`session_loader.go:18-22`), so the peak is per *cached session*, not per request.
@@ -128,11 +139,12 @@ worth taking, but it is not the explanation for the 100k knee.
 
 ## 5. Defaults imply a ~60,000-task ceiling per session
 
-At the measured ~2 ms/task, the default 2-minute `--session-process-timeout`
-is exhausted at roughly 60,000 tasks — and in practice the 35 s `WriteTimeout`
-(finding 1) bites at ~17,000. Neither number appears in the documentation, and
-nothing warns the user as a session approaches them. A session that exceeds them
-is not degraded, it is simply unopenable.
+At the shipped 500m the measured ~2 ms/task exhausts the default 2-minute
+`--session-process-timeout` at roughly 60,000 tasks. With 4 cores (0.62 ms/task)
+that ceiling moves out to ~190,000 — but the 35 s `WriteTimeout` from finding 1
+then binds first, at about **56,000 tasks**. Neither number appears in the
+documentation, and nothing warns a user approaching them: a session past the
+limit is not degraded, it is simply unopenable.
 
 ## 6. Listing clusters logs an ERROR for its own placeholder objects
 
@@ -211,6 +223,8 @@ and cold-load time within noise. Consider defaulting
   `RAY_task_events_max_num_status_events_buffer_on_worker`, on the process that
   *owns* the tasks (the driver, on the head node).
   `RAY_ray_event_recorder_max_queued_events` is a different, GCS-side buffer and
-  does not affect this path. We measured 0.46% task loss at 3,084 tasks/s with a
-  10 s post-submission drain, and zero loss at ≤2,880 tasks/s — consistent with
-  the owner's buffer draining at ≤10,000 events per flush at exit.
+  does not affect this path. Loss tracked the submission rate, not the drain: every
+  run at ≥3,084 tasks/s lost tasks (0.46% and 1.7%) and every run at
+  ≤2,965 tasks/s lost none, **including one run that lost 1.7% despite a 30 s
+  drain**. That refutes the "shutdown tail" explanation we started with — the
+  overflow happens during submission, not only at exit.

@@ -10,8 +10,9 @@ D     sessions you need to keep         (drives storage cost and cache pressure)
 ```
 
 Everything below follows from the measured constants: **4.36 events/task**,
-**725 B/event**, **120 µs of collector CPU per event**, **~2 ms of History Server
-load time per task**, **~23 KiB of History Server heap per task**.
+**725 B/event**, **120 µs of collector CPU per event**, **0.62 ms of History
+Server load time per task** (2 ms if you leave its CPU at the shipped 500m), and
+**~23 KiB of History Server heap per task**.
 
 ---
 
@@ -62,16 +63,28 @@ far away, that headroom is what absorbs it.
 ## 2. History Server
 
 ```
-memory  = 100 MiB + (N_largest × 23 KiB) × (sessions held in cache)
-cpu     = 2 cores minimum        NOT the 500m the sample manifest ships with
+memory   = 100 MiB + (N_largest × 23 KiB) × (sessions held in cache)
+cpu      = limits 4, requests 1        NOT the 500m the sample manifest ships with
+load time = N × 0.62 ms at that limit  (N × 2 ms and superlinear at 500m)
 ```
 
-**Raise the CPU limit first.** `historyserver/config/historyserver.yaml` sets
-`limits.cpu: "500m"` and nothing else, so Kubernetes also pins
-`requests.cpu = 500m`. Cold load is CPU-bound — JSON decode, map building, and
-GC — and the container sat at 0.42–0.50 cores for the entire load in *every*
-run: it is saturated, not comfortable. Every latency in this report was measured
-under that half-core quota.
+**Raise the CPU limit first — it is the highest-return change available.**
+`historyserver/config/historyserver.yaml` sets `limits.cpu: "500m"` and nothing
+else, so Kubernetes pins `requests.cpu = 500m` too. Cold load is CPU-bound (JSON
+decode, map building, GC), and the container sat at 0.42–0.50 cores for the
+entire load in *every* run at that limit — saturated, not comfortable.
+
+Measured, same build and cluster, only the limit changed:
+
+| N | 500m | 4 cores | speedup |
+|---:|---:|---:|---:|
+| 50,000 | 97.9 s | 30.5 s | 3.2× |
+| 100,000 | 907.3 s | 62.7 s | **14.5×** |
+
+At 4 cores it used 1.18 cores on average and peaked at 2.2, so 4 is headroom
+rather than a target; 2 would capture most of the win. The apparent
+"superlinear blowup past 50k" disappears: per-task cost is 0.61 ms at 50k and
+0.63 ms at 100k.
 
 The cache holds up to `--session-cache-size` sessions (default 100) with no TTL
 unless you set `--session-cache-ttl`. **The memory you must budget is not one
@@ -98,21 +111,18 @@ If your sessions are large, cap the blast radius instead of buying RAM:
 
 ### Timeouts — and where the wall really is
 
-Load time is ~2 ms/task, so `--session-process-timeout` (default `2m`) is
-implicitly a **60,000-task ceiling**. Raising it is necessary for larger
-sessions but not sufficient: the HTTP server's own `WriteTimeout` is a
-hardcoded 35 s, which is *shorter* than the default load timeout, so a slow load
-cannot deliver any response — success or error — to an HTTP/1 client. See
+With adequate CPU the default `--session-process-timeout` of 2 minutes covers
+roughly **190,000 tasks** (at 0.62 ms/task), so it stops being the binding
+constraint. What binds instead is the HTTP server's hardcoded 35 s
+`WriteTimeout`: a load longer than that cannot deliver *any* response — success
+or error — to an HTTP/1 client, which puts the practical ceiling at about
+**56,000 tasks** even on a fast server. That one needs a code change; see
 [FINDINGS.md](FINDINGS.md).
 
 ```
---session-process-timeout = N_largest × 2 ms × 2   (safety factor)
-   50k tasks -> 200s   100k tasks -> 400s (and expect worse: 100k measured 907s)
+--session-process-timeout = N_largest × 0.62 ms × 2     (safety factor)
+   100k tasks -> 124s   200k tasks -> 250s
 ```
-
-Beyond ~50k tasks per session the honest recommendation is **don't** — split
-work into more, smaller Ray jobs (each job is a separate session), or accept
-that opening those sessions takes many minutes.
 
 ---
 

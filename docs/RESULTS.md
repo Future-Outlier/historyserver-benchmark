@@ -51,8 +51,8 @@ When the bytes actually reach the bucket, from snapshots at T0 (before), T1
 
 ## History Server
 
-Cold load = `GET /enter_cluster` on a dead session. **All of these ran under the
-sample manifest's 500m CPU limit, which the load saturates** — see
+Cold load = `GET /enter_cluster` on a dead session. **The table below ran under
+the sample manifest's 500m CPU limit, which the load saturates** — see
 [FINDINGS.md](FINDINGS.md#2-the-sample-manifest-gives-the-history-server-500m-of-cpu-and-the-cold-load-saturates-it).
 
 | N | cold load | ms/task | peak heap | heap/task | avg cores |
@@ -82,11 +82,23 @@ Warm reads from a loaded snapshot, 10 iterations each:
 `limit` above 10,000 returns `400` by design (`RayMaxLimitFromAPIServer`,
 mirroring Ray's dashboard API), so the task list is always paginated.
 
-### Interventions measured so far
+### Interventions measured
 
-| Change | N | Before | After |
-|---|---:|---:|---:|
-| per-event `Infof` → `Debugf` | 50,000 | 97.9 s | 85.3 s (−13%) |
+| Change | N | Before | After | |
+|---|---:|---:|---:|---|
+| CPU limit 500m → 4 | 50,000 | 97.9 s | 30.5 s | 3.2× |
+| CPU limit 500m → 4 | 100,000 | 907.3 s | 62.7 s | **14.5×** |
+| per-event `Infof` → `Debugf` | 50,000 | 97.9 s | 85.3 s | 1.15× |
+| per-event `Infof` → `Debugf` | 100,000 | 907.3 s | >1,270 s (never finished) | none |
+
+The logging change is real but small, and it does **not** explain the 100k
+blowup — with the log removed and CPU still at 500m, a 100k load ran past the
+21-minute probe budget without finishing. The CPU limit explains it: at 4 cores
+the same session loads in 62.7 s and the per-task cost is flat (0.61 ms at 50k,
+0.63 ms at 100k) instead of 4.6× worse.
+
+At 4 cores the container used 1.18 cores on average and peaked at 2.2, so the
+load is not single-threaded — Go's GC wants cores of its own.
 
 ## Collector
 
@@ -132,12 +144,18 @@ capture. Do not read those zeros as measurements.
 | `C-gzip-n100000` | 2,880 tasks/s | 10 s | default | 100,000 / 100,000 |
 | `rerun-A-n100k-ring` | 2,692 tasks/s | 10 s | default | 100,000 / 100,000 |
 | `armA-n100k` | 2,494 tasks/s | 30 s | 1,000,000 | 100,000 / 100,000 |
+| `hscpu4-n50000` | 2,965 tasks/s | 20 s | default | 50,000 / 50,000 |
+| `hscpu4-n100000` | 3,138 tasks/s | 30 s | default | **98,322 / 100,000** |
 
-One run lost 460 task definitions (0.46%). Not the collector — zero 503s, zero
-upload failures, and the missing events never arrived. The fit is Ray's
-shutdown tail: the owner's status-event buffer drains at ≤10,000 events per
-flush, so a ~76,000-event backlog needs ~7.6 s and the driver slept 10 s. At
-2,880 tasks/s the drain fits; at 3,084 it does not. The governing knob is
-`RAY_task_events_max_num_status_events_buffer_on_worker` on the *owning*
-process (the driver, on the head) — not the GCS-side
-`RAY_ray_event_recorder_max_queued_events`.
+Loss follows the submission rate: both runs above 3,000 tasks/s lost tasks
+(0.46% and 1.7%), every run at or below 2,965 lost none. It is not the
+collector — zero disk-pressure 503s, zero upload failures, and the missing
+*definition* events never arrived at all.
+
+Our first explanation was Ray's shutdown tail (the owner's status-event buffer
+drains at ≤10,000 events per flush, so a backlog needs seconds the exiting
+driver does not give it). **The `hscpu4-n100000` run refutes it**: 30 s of drain
+and it still lost 1.7%. Overflow during submission fits the data better. The
+governing knob is `RAY_task_events_max_num_status_events_buffer_on_worker` on
+the *owning* process (the driver, on the head) — not the GCS-side
+`RAY_ray_event_recorder_max_queued_events`, which is a different buffer.

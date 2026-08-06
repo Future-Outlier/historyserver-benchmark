@@ -13,9 +13,16 @@ hand-entered.
 ```
 events   E ≈ N × 4.36              1 definition + 2.36 lifecycle + 1 profile per task
 storage  S ≈ N × 3.15 KiB          raw   →   N × 0.29 KiB with gzip (91% smaller)
-HS load  T ≈ N × 2 ms              linear to 50k; 100k took 4.6× the prediction
+HS load  T ≈ N × 0.62 ms           with enough CPU — but N × 2 ms, and superlinear
+                                   past 50k, at the 500m limit the sample manifest ships
 HS RSS   M ≈ 100 MiB + N × 23 KiB  per session held in the snapshot cache
 ```
+
+> **The single most valuable thing in this repo:** KubeRay's sample History
+> Server manifest caps the container at `500m` CPU, and the cold load saturates
+> it. Raising that limit to 4 cores made a 100,000-task session load
+> **14.5× faster — 907 s → 62.7 s** — and removed the superlinearity entirely.
+> Nothing else measured here comes close to that return.
 
 `N` = tasks in one Ray session. Ray actor calls emit task events too, so count them in `N`.
 
@@ -41,16 +48,29 @@ drain, without which the session never appears in the UI at all.
 
 ## History Server
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Cold load from 1k to 50k tasks tracks the 2 ms/task line exactly" src="docs/img/hs-load-light.svg"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-cpu-limit-dark.svg"><img alt="Cold load at 50k and 100k tasks: 97.9s and 907s at a 500m CPU limit versus 30.5s and 62.7s at 4 cores" src="docs/img/hs-cpu-limit-light.svg"></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-knee-dark.svg"><img alt="Milliseconds per task stays at ~2 ms through 50k tasks then jumps to 9.07 ms at 100k" src="docs/img/hs-load-knee-light.svg"></picture>
+Cold load is `GET /enter_cluster` — the first time anyone opens a dead session,
+and where all of the History Server's cost lives (process start does zero
+storage I/O). Same session, same build, same cluster; the only difference is
+`resources.limits.cpu`.
 
-Cold load is `GET /enter_cluster` — the first time anyone opens a dead session.
-It is flatly linear at **~2 ms/task up to 50,000 tasks** (two charts because a
-single axis cannot show both 2 s and 907 s). At 100,000 tasks it took **907
-seconds**, 4.6× the linear prediction, and no client ever received a response:
-three separate timeouts sit in that path and the shortest is a hardcoded 35 s.
-See [docs/FINDINGS.md](docs/FINDINGS.md).
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-knee-dark.svg"><img alt="Per-task cold load cost: flat at 2ms then 9.07ms at 100k under 500m, versus a flat 0.61-0.63ms at 4 cores" src="docs/img/hs-load-knee-light.svg"></picture>
+
+The "superlinear blowup past 50k tasks" was not the data — it was the quota.
+Under `500m` the container sat at 0.42–0.50 cores for the entire load in every
+run, so as the live heap grew, Go's GC and the decoder fought over the same half
+core. Given 4 cores (it used 1.18 average, 2.2 peak) the cost per task is flat
+again: **0.61 ms/task at 50k, 0.63 ms/task at 100k**.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Cold load from 1k to 50k tasks tracks the 2 ms/task line exactly under the 500m limit" src="docs/img/hs-load-light.svg"></picture>
+
+Under the shipped limit the 1k–50k region is still perfectly linear, which is
+why the blowup at 100k looked like an algorithmic cliff rather than a resource
+one. Two other things sit on this path regardless of CPU: a hardcoded 35 s HTTP
+`WriteTimeout` that is *shorter* than the 2-minute load timeout it should
+outlive, and ~436,000 INFO log lines per 100k-task load (removing them bought
+13%). See [docs/FINDINGS.md](docs/FINDINGS.md).
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-memory-dark.svg"><img alt="History Server peak heap: 184 MiB at 5k tasks up to 2.2 GiB at 100k tasks" src="docs/img/hs-memory-light.svg"></picture>
 
@@ -94,7 +114,7 @@ replica count; only from tasks/s per node.
 | Collector CPU | `requests: R × 0.52 millicores`, `limits:` 3× that (R = sustained tasks/s **per node**) | 120 µs/event × 4.36 events/task; bursts run 2–4× the sustained average |
 | Collector memory | `requests: 128Mi`, `limits: 512Mi` | heap is flat at ~120 MiB; cgroup total incl. page cache hits 251 MiB |
 | Compression | turn it **on** | 91% smaller, no measurable cost |
-| History Server CPU | **raise it** — the sample manifest ships `limits.cpu: 500m` | cold load is CPU-bound and sat at 0.42–0.50 cores, saturated, in every run |
+| History Server CPU | **`limits.cpu: 4`** — the sample manifest ships `500m` | 14.5× faster at 100k; the load wants ~1.2 cores sustained and bursts to 2.2 |
 | History Server memory | `100 MiB + 23 KiB × N × sessions cached` | snapshots are retained in the LRU |
 | `--session-process-timeout` | `N × 2 ms × 2` | the 2-minute default implies a ~60k-task ceiling |
 | Session size | keep under ~50k tasks | beyond that, load time degrades superlinearly |
