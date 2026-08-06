@@ -13,17 +13,20 @@ hand-entered.
 ```
 events   E ≈ N × 4.36              1 definition + 2.36 lifecycle + 1 profile per task
 storage  S ≈ N × 3.15 KiB          raw   →   N × 0.29 KiB with gzip (91% smaller)
-HS load  T ≈ N × 0.62 ms           with enough CPU — but N × 2 ms, and superlinear
-                                   past 50k, at the 500m limit the sample manifest ships
+HS load  T ≈ N × 0.6 ms            at 2+ cores   →   N × 1.5 ms at the shipped 500m
+                                   linear at both, measured from 1k to 200k tasks
 HS RSS   M ≈ 100 MiB + N × 23 KiB  per session held in the snapshot cache
+opens?   N < timeout / per-task    ~79k tasks at 500m, ~200k at 2+ cores — past that
+                                   the load is aborted and retried forever
 ```
 
 > **The single most valuable thing in this repo:** KubeRay's sample History
 > Server manifest caps the container at `500m` CPU, and the cold load saturates
-> it for its entire duration against ~1.2 cores of demand. Same code, same
-> cluster, 50,000 tasks: **85 s at `500m` versus 32 s at `2`**. At 100,000 tasks
-> the `500m` configuration never returned a response at all, while `2`–`4`
-> finish in 63–75 s. Nothing else measured here comes close to that return.
+> it for its entire duration against ~1.2 cores of demand. That costs **2.5×**
+> (1.5 ms/task versus 0.6), and — because the server aborts any load that exceeds
+> `--session-process-timeout` and every retry starts over — it drops the largest
+> openable session from ~200,000 tasks to **~79,000**. Past that line a session
+> is not slow, it is **unopenable**. Two lines of YAML fix both.
 
 `N` = tasks in one Ray session. Ray actor calls emit task events too, so count them in `N`.
 
@@ -43,12 +46,17 @@ resources:
     cpu: "4"      # was "500m"
 ```
 
-50k tasks: **85 s → 32 s**. At 100k the `500m` configuration never completed a
-cold load inside a 21-minute budget, so there is no "before" number to divide —
-that is the finding. The plateau starts at **2 cores** (64.4 s at 100k) and
-nothing above it helps, including removing the limit entirely. With enough CPU the cost per task is flat at **0.61–0.72 ms**
-from 1k to 100k. The load uses ~1.2 cores sustained and bursts to 2.2, so `2`
-already captures most of the win and `8` or no limit at all buy nothing.
+50k tasks: **85 s → 32 s**; 100k: **151 s → 68 s**. The plateau starts at
+**2 cores** and nothing above it helps, including removing the limit entirely —
+the load simply does not want more than ~1.2 cores.
+
+The 100k number at `500m` took a raised `--session-process-timeout` to measure at
+all. With the shipped 2-minute default that load is aborted at 120 s, the partial
+state is discarded, and every retry starts over, so it never returns. Earlier
+versions of this report mistook that for a 907-second load and called it
+superlinear. It is neither: **cost per task is flat at both CPU limits** —
+1.51–1.53 ms at `500m`, 0.60–0.72 ms at 2–4 cores, measured from 1k to 200k
+tasks.
 
 **2. Turn compression on.** `RAY_COLLECTOR_EVENT_COMPRESSION_ENABLED=true` on the
 collector sidecars cuts stored bytes by **91%** (3.15 KiB → 0.29 KiB per task)
@@ -106,11 +114,9 @@ storage I/O). Same session, same build, same cluster; the only difference is
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-knee-dark.svg"><img alt="Per-task cold load cost: flat at 2ms then 9.07ms at 100k under 500m, versus a flat 0.61-0.63ms at 4 cores" src="docs/img/hs-load-knee-light.svg"></picture>
 
-The "superlinear blowup past 50k tasks" was not the data — it was the quota.
-Under `500m` the container sat at 0.42–0.50 cores for the entire load in every
-run, so as the live heap grew, Go's GC and the decoder fought over the same half
-core. Given 4 cores (it used 1.18 average, 2.2 peak) the cost per task is flat
-again: **0.61 ms/task at 50k, 0.63 ms/task at 100k**.
+There is no blowup and no knee. Cost per task is constant at both limits; the
+limit only sets which constant. What looked like a cliff was the server-side
+timeout aborting the load and the retry loop never converging.
 
 Two effects could be bundled here, and we separated them. The History Server is
 a Go 1.26 binary, and since Go 1.25 the runtime takes `GOMAXPROCS` from the

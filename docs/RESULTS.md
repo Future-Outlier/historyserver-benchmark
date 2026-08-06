@@ -78,14 +78,17 @@ the sample manifest's 500m CPU limit, which the load saturates** — see
 | 10,000 | 19.9 s | 1.99 | 291 MiB | 31 KiB | 0.48 |
 | 20,000 | 33.9–41.3 s | 1.69–2.06 | 467–494 MiB | 25 KiB | 0.48–0.49 |
 | 50,000 | 97.9 s | 1.96 | 1,132 MiB | 24 KiB | 0.49 |
-| 100,000 | **never completed** | — | 2,202 MiB | — | 0.50 |
+| 100,000 | **never completed** under the default timeout; **151.3 s** with it raised | 1.51 | 2,202 MiB | — | 0.50 |
 
-At 100k under `500m` no request ever returned 200, in any run, up to a 21-minute
-probe budget. Earlier versions of this report quoted the elapsed probe time
-(907 s) as if it were a load time; it is not, and it has been removed. The
-server's `--session-process-timeout` (2 min default) aborts the load and the
-next attempt restarts, so this configuration cannot produce a latency at all
-without raising that flag.
+At 100k under `500m` no request ever returned 200 in any run, up to a 21-minute
+probe budget — because the server's `--session-process-timeout` (2 min default)
+aborts the load and every retry starts over. With that flag raised to 30 minutes
+the same session loads in **151.3 s**, i.e. 1.51 ms/task, the same constant as
+50k (76.3 s, 1.53 ms/task). There is no knee.
+
+Earlier versions of this report quoted the elapsed probe time (907 s) as if it
+were a load time and called the result superlinear. Both claims were wrong and
+have been removed.
 
 Warm reads from a loaded snapshot, 10 iterations each:
 

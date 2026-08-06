@@ -56,15 +56,15 @@ class Chart:
                f'fill="{t["muted"]}">{html.escape(self.subtitle)}</text>',
                f'<text x="{PAD_L - 46}" y="66" font-family="{FONT}" font-size="11" '
                f'fill="{t["muted"]}">{html.escape(self.ylabel)}</text>']
-        for e in range(ydecades[0], ydecades[1] + 1):
+        for e in range(int(ydecades[0]), int(ydecades[1]) + 1):
             y = self.ly(10.0 ** e)
             out.append(f'<line x1="{PAD_L}" y1="{y:.1f}" x2="{W - PAD_R}" y2="{y:.1f}" '
                        f'stroke="{t["grid"]}" stroke-width="1"/>')
             out.append(f'<text x="{PAD_L - 8}" y="{y + 4:.1f}" text-anchor="end" font-family="{FONT}" '
                        f'font-size="11" fill="{t["muted"]}">{yfmt(10.0 ** e)}</text>')
-        for e in range(xdecades[0], xdecades[1] + 1):
+        for e in range(int(xdecades[0]), int(xdecades[1]) + 1):
             x = self.lx(10.0 ** e)
-            anchor = "end" if e == xdecades[1] else ("start" if e == xdecades[0] else "middle")
+            anchor = "start" if e == int(xdecades[0]) else "middle"
             out.append(f'<text x="{x:.1f}" y="{H - PAD_B + 20:.1f}" text-anchor="{anchor}" '
                        f'font-family="{FONT}" font-size="12" fill="{t["ink2"]}">{xfmt(10.0 ** e)}</text>')
         out.append(f'<line x1="{PAD_L}" y1="{H - PAD_B}" x2="{W - PAD_R}" y2="{H - PAD_B}" '
@@ -258,24 +258,22 @@ def build(mode, rows, outdir):
     ch.note("3.15 KiB -> 0.29 KiB  (91% saved)")
     write(ch, outdir, "storage-per-task", mode)
 
-    # 3. The scaling curve. Log-log because the range spans three orders of
-    # magnitude. The 500m series stops at 50k on purpose: at 100k that
-    # configuration never returned a response, so there is no latency to plot.
-    N6 = [1000, 5000, 10000, 20000, 50000, 100000]
-    s500 = [2.28, 9.83, 19.86, 37.60, 97.85]
-    s4 = [0.69, 3.17, 6.25, 14.45, 30.52, 62.67]
+    # 3. The scaling curve, with the server-side timeout raised so every point is
+    # a completed load. Log-log: a straight line means linear in task count.
+    N500 = [1000, 5000, 10000, 20000, 50000, 100000]
+    s500 = [2.28, 9.83, 19.86, 37.60, 76.30, 151.30]
+    N4 = [1000, 5000, 10000, 20000, 50000, 100000, 200000]
+    s4 = [0.69, 3.17, 6.25, 14.45, 30.52, 64.80, 119.90]
     ch = Chart(t, "History Server cold load vs session size",
                "GET /enter_cluster, log-log: a straight line means cost scales linearly with tasks",
                1, "seconds (log scale)")
-    ch.logframe((3, 5), (-1, 3),
+    ch.logframe((3, 5.31), (-1, 3),
                 lambda v: {1e3: "1k", 1e4: "10k", 1e5: "100k tasks"}[v],
                 lambda v: {0.1: "0.1", 1.0: "1", 10.0: "10", 100.0: "100", 1000.0: "1,000"}[v])
-    ch.line(list(zip(N6[:5], s500)), t["s2"],
-            [None, None, None, None, "97.8s"])
-    ch.line(list(zip(N6, s4)), t["s1"],
-            [None, None, None, None, "30.5s", "62.7s"])
-    ch.legend([("500m (shipped)", t["s2"]), ("4 cores", t["s1"])])
-    ch.note("500m stops at 50k: at 100k it never returned a response", y=H - 13)
+    ch.line(list(zip(N500, s500)), t["s2"], [None] * 5 + ["151s"])
+    ch.line(list(zip(N4, s4)), t["s1"], [None] * 6 + ["120s"])
+    ch.legend([("500m: 1.5 ms/task", t["s2"]), ("4 cores: 0.6 ms/task", t["s1"])])
+    ch.note("both straight: no cliff anywhere, only a different constant", y=H - 13)
     write(ch, outdir, "hs-load", mode)
 
     # 4. The headline: 100k, where the gap stops being a gap.
@@ -297,14 +295,14 @@ def build(mode, rows, outdir):
     labels6 = ["1k", "5k", "10k", "20k", "50k", "100k"]
     ch = Chart(t, "Cold load per task", "flat means the cost scales linearly with task count", 3,
                "milliseconds per task", 6)
-    slot = ch.frame(labels6)
-    ch.bars(slot, [("500m (shipped)", t["s2"]), ("4 cores", t["s1"])],
-            [[2.28, 1.97, 1.99, 1.88, 1.96, None],
-             [0.69, 0.63, 0.63, 0.72, 0.61, 0.63]],
-            [["2.3", "2.0", "2.0", "1.9", "2.0", None],
-             ["0.69", "0.63", "0.63", "0.72", "0.61", "0.63"]])
-    ch.legend([("500m (shipped)", t["s2"]), ("4 cores", t["s1"])])
-    ch.note("no 100k bar for 500m: that load never completed")
+    slot = ch.frame(["1k", "5k", "10k", "20k", "50k", "100k", "200k"])
+    ch.bars(slot, [("500m (shipped)", t["s2"]), ("2-4 cores", t["s1"])],
+            [[2.28, 1.97, 1.99, 1.88, 1.53, 1.51, None],
+             [0.69, 0.63, 0.63, 0.72, 0.61, 0.65, 0.60]],
+            [["2.3", "2.0", "2.0", "1.9", "1.5", "1.5", None],
+             ["0.69", "0.63", "0.63", "0.72", "0.61", "0.65", "0.60"]])
+    ch.legend([("500m (shipped)", t["s2"]), ("2-4 cores", t["s1"])])
+    ch.note("flat at both limits, once the server timeout is not in the way")
     write(ch, outdir, "hs-load-knee", mode)
 
     # 4. HS memory

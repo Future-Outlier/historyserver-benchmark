@@ -41,13 +41,16 @@ granularity is one whole file.
 
 **Measured:** at the shipped `500m` CPU limit, a 100,000-task session never
 returned a response — not within a 15-minute budget, and not within 21 minutes
-on a retry with the per-event log removed. It is worse than "slow": the server's
-own `--session-process-timeout` aborts the load at 2 minutes and discards the
-partial state, so each new attempt starts over. From the user's side this is a
-hang that never resolves.
+on a retry with the per-event log removed.
 
-**What we did not measure:** how long that load would take if allowed to finish.
-Elapsed probe time is not a load time, and this report no longer quotes one.
+Then we raised `--session-process-timeout` to 30 minutes and ran it again:
+**151.3 seconds.** The load was never slow in the way the failures suggested. It
+needs 151 s, the server aborts it at 120 s, discards the partial state, and every
+retry repeats that. A load that exceeds the timeout does not degrade — it becomes
+impossible, and the excess can be as little as 25%.
+
+Earlier versions of this report quoted the failed probes' elapsed time (907 s)
+as if it were a load time, and called the result superlinear. Both were wrong.
 
 Suggested fixes, cheapest first:
 - Make `WriteTimeout` configurable and require it to be ≥ `--session-process-timeout`
@@ -95,6 +98,7 @@ tested and eliminated:
 
 | Hypothesis | Test | Result |
 |---|---|---|
+| Superlinear algorithm past 50k | raise the server timeout and let 100k finish at `500m` | **151.3 s = 1.51 ms/task**, the same constant as 50k: no knee exists |
 | Go parallelism is too low | force `GOMAXPROCS=4` at `500m` | 85.3 → 84.7 s: **no effect** |
 | …and conversely | pin `GOMAXPROCS=1` at 4 cores | 100k still loads in 76.3 s |
 | GC pressure | `GOGC=400` at `500m`, 100k | GC share 6% → **1%**, heap 1.2 → 3.5 GB, and the load **still never completed** |
@@ -188,15 +192,23 @@ The load is aborted at `--session-process-timeout` (2 minutes by default) and
 the partial state is discarded, so the next attempt starts from scratch and the
 retry loop never converges. The threshold is just `timeout ÷ per-task cost`:
 
-| CPU limit | per-task cost | tasks that fit in the 2-minute default |
+| CPU limit | measured per-task cost | tasks that fit in the 2-minute default |
 |---|---:|---:|
-| `500m` (shipped) | ~1.7 ms | ~70,000 |
-| `2`–`4` | ~0.63 ms | ~190,000 |
+| `500m` (shipped) | 1.51 ms | **~79,000** |
+| `2`–`4` | 0.60 ms | **~200,000** |
 
-Both were confirmed the hard way. At `500m`, 100k never completed in any run. At
-**4 cores, 200k never completed either** — 200,000 × 0.63 ms ≈ 126 s, just past
-the 120 s default. Nothing in the documentation mentions the limit, and nothing
-warns a user approaching it.
+Both edges were confirmed by runs that never returned, and then by runs that did
+once the timeout was raised:
+
+| Session | Default 2-minute timeout | With `--session-process-timeout=30m` |
+|---|---|---:|
+| 100k at `500m` | never returned, in any run | **151.3 s** |
+| 200k at 4 cores | never returned | **119.9 s** |
+
+The 200k case is the sharpest illustration available: it needs 119.9 s against a
+120 s limit, and that ~0.1% overshoot is the difference between a session that
+opens in two minutes and one that can never be opened at all. Nothing in the
+documentation mentions the limit, and nothing warns a user approaching it.
 
 Note the 35 s `WriteTimeout` from finding 1 binds even earlier for the *client*:
 a load past 35 s cannot deliver its response at all, which is ~56,000 tasks at

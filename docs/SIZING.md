@@ -10,9 +10,10 @@ D     sessions you need to keep         (drives storage cost and cache pressure)
 ```
 
 Everything below follows from the measured constants: **4.36 events/task**,
-**725 B/event**, **120 µs of collector CPU per event**, **0.62 ms of History
-Server load time per task** (2 ms if you leave its CPU at the shipped 500m), and
-**~23 KiB of History Server heap per task**.
+**725 B/event**, **120 µs of collector CPU per event**, **0.60 ms of History
+Server load time per task** at 2+ cores (1.51 ms at the shipped `500m`), and
+**~23 KiB of History Server memory per task**. Load time is linear in task count
+at both CPU limits, measured from 1,000 to 200,000 tasks.
 
 ---
 
@@ -181,12 +182,13 @@ timeout and every retry starts over.
 
 ```
 tasks that fit = --session-process-timeout / per-task cost
-   500m, ~1.7 ms/task  ->  ~70,000     (100k confirmed never to complete)
-   2-4 cores, 0.63 ms  ->  ~190,000    (200k confirmed never to complete)
+   500m, 1.51 ms/task   ->  ~79,000     (100k needs 151.3s: confirmed both ways)
+   2-4 cores, 0.60 ms   ->  ~200,000    (200k needs 119.9s against a 120s limit)
 ```
 
-Both ends were confirmed by runs that never returned. So raise the flag together
-with the CPU limit: CPU alone just moves the wall.
+Both edges were confirmed twice: once by runs that never returned under the
+default, and once by the same sessions completing after the flag was raised. So
+raise the flag together with the CPU limit — CPU alone just moves the wall.
 
 The HTTP server's hardcoded 35 s `WriteTimeout` binds even earlier for the
 *client* — about 56,000 tasks at 0.63 ms/task — but the server-side cache is
