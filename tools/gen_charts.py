@@ -206,16 +206,29 @@ def build(mode, rows, outdir):
     ch.note("3.15 KiB -> 0.29 KiB  (91% saved)")
     write(ch, outdir, "storage-per-task", mode)
 
-    # 3. HS cold load: measured vs linear extrapolation of the 5k-50k slope
-    meas = [r["hs_cold_s"] for r in A[:4]] + [907.3]
-    lin = [r["tasks"] * 0.00196 for r in A]
-    ch = Chart(t, "History Server cold load", "GET /enter_cluster, first open of a dead session", 950, "seconds", 5)
-    slot = ch.frame(xlabels)
-    ch.bars(slot, [("measured", t["s1"]), ("linear @ 2 ms/task", t["s3"])], [meas, lin],
-            [[f"{v:.0f}s" for v in meas], None])
+    # 3. HS cold load. Two panels on purpose: 907s is 460x the 1k bar, so one
+    # linear axis would squash the whole 1k-50k region into invisible slivers.
+    lin4 = [r["tasks"] * 0.00196 for r in A[:4]]
+    meas4 = [r["hs_cold_s"] for r in A[:4]]
+    ch = Chart(t, "History Server cold load, 1k-50k tasks",
+               "GET /enter_cluster, first open of a dead session", 110, "seconds", 5)
+    slot = ch.frame(["1k", "5k", "10k", "50k"])
+    ch.bars(slot, [("measured", t["s1"]), ("linear @ 2 ms/task", t["s3"])], [meas4, lin4],
+            [[f"{v:.1f}s" for v in meas4], None])
     ch.legend([("measured", t["s1"]), ("linear @ 2 ms/task", t["s3"])])
-    ch.note("100k = 4.6x the linear prediction; no client ever saw a response")
+    ch.note("measured 2.3, 9.8, 19.9, 97.8 s against 2.0, 9.8, 19.6, 98.0 predicted")
     write(ch, outdir, "hs-load", mode)
+
+    perms = [r["hs_cold_s"] / r["tasks"] * 1000 for r in A[:4]] + [9.07]
+    ch = Chart(t, "...and the knee at 100k", "the same runs, divided by task count", 10, "milliseconds per task", 5)
+    slot = ch.frame(xlabels)
+    colors = [t["s1"]] * 4 + [t["s2"]]
+    for i, (v, c) in enumerate(zip(perms, colors)):
+        ch.bars(slot, [("", c)], [[None] * i + [v] + [None] * (len(perms) - i - 1)],
+                [[None] * i + [f"{v:.2f}"] + [None] * (len(perms) - i - 1)])
+    ch.legend([("linear regime", t["s1"]), ("100k: 4.6x worse per task", t["s2"])])
+    ch.note("907 s total, and no client ever saw a response")
+    write(ch, outdir, "hs-load-knee", mode)
 
     # 4. HS memory
     mem = [r["hs_peak_mib"] for r in A]

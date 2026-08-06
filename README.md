@@ -41,13 +41,16 @@ drain, without which the session never appears in the UI at all.
 
 ## History Server
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="History Server cold load: 2ms per task up to 50k tasks (98s), then 907s at 100k" src="docs/img/hs-load-light.svg"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-dark.svg"><img alt="Cold load from 1k to 50k tasks tracks the 2 ms/task line exactly" src="docs/img/hs-load-light.svg"></picture>
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-load-knee-dark.svg"><img alt="Milliseconds per task stays at ~2 ms through 50k tasks then jumps to 9.07 ms at 100k" src="docs/img/hs-load-knee-light.svg"></picture>
 
 Cold load is `GET /enter_cluster` — the first time anyone opens a dead session.
-It is flatly linear at **~2 ms/task up to 50,000 tasks**, then falls apart: at
-100,000 it took **907 seconds**, 4.6× the linear prediction, and no client ever
-received a response, because three separate timeouts sit in the path and the
-shortest one is a hardcoded 35 s. See [docs/FINDINGS.md](docs/FINDINGS.md).
+It is flatly linear at **~2 ms/task up to 50,000 tasks** (two charts because a
+single axis cannot show both 2 s and 907 s). At 100,000 tasks it took **907
+seconds**, 4.6× the linear prediction, and no client ever received a response:
+three separate timeouts sit in that path and the shortest is a hardcoded 35 s.
+See [docs/FINDINGS.md](docs/FINDINGS.md).
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/hs-memory-dark.svg"><img alt="History Server peak heap: 184 MiB at 5k tasks up to 2.2 GiB at 100k tasks" src="docs/img/hs-memory-light.svg"></picture>
 
@@ -83,7 +86,7 @@ replica count; only from tasks/s per node.
 
 | | Recommendation | Why |
 |---|---|---|
-| Collector CPU | `requests: R × 0.52 millicores` (R = peak tasks/s **per node**), limit 3× | 120 µs/event × 4.36 events/task, bursts 2–4× sustained |
+| Collector CPU | `requests: R × 0.52 millicores`, `limits:` 3× that (R = sustained tasks/s **per node**) | 120 µs/event × 4.36 events/task; bursts run 2–4× the sustained average |
 | Collector memory | `requests: 128Mi`, `limits: 512Mi` | heap is flat at ~120 MiB; cgroup total incl. page cache hits 251 MiB |
 | Compression | turn it **on** | 91% smaller, no measurable cost |
 | History Server memory | `100 MiB + 23 KiB × N × sessions cached` | snapshots are retained in the LRU |

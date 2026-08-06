@@ -75,7 +75,30 @@ The snapshot then stays in an LRU of up to 100 sessions with no TTL by default
 Fixes worth considering: stream-decode line by line into typed structs instead of
 `map[string]any`; decode files in parallel; store a compact columnar snapshot.
 
-## 3. Defaults imply a ~60,000-task ceiling per session
+## 3. The cold-load path logs one INFO line per event
+
+```go
+// historyserver/pkg/eventserver/eventserver.go:136, inside storeEvent(),
+// which eventserver.go:1164 calls once per event
+logrus.Infof("current eventType: %v", eventType)
+```
+
+A 100,000-task session emits ~436,000 of these lines on every cold load. The
+binary never calls `logrus.SetLevel`, so there is no way to turn them off
+without a rebuild.
+
+**Measured A/B** — same cluster, same images otherwise, only this line changed to
+`Debugf`:
+
+| N | stock | `Debugf` | change |
+|---:|---:|---:|---:|
+| 50,000 | 97.9 s | 85.3 s | **−13%** |
+
+Peak heap was unchanged (1,132 → 1,149 MiB), which is the expected signature of
+a pure CPU/IO cost rather than an allocation one. A one-line change buying 13% is
+worth taking, but it is not the explanation for the 100k knee.
+
+## 4. Defaults imply a ~60,000-task ceiling per session
 
 At the measured ~2 ms/task, the default 2-minute `--session-process-timeout`
 is exhausted at roughly 60,000 tasks — and in practice the 35 s `WriteTimeout`
@@ -83,7 +106,7 @@ is exhausted at roughly 60,000 tasks — and in practice the 35 s `WriteTimeout`
 nothing warns the user as a session approaches them. A session that exceeds them
 is not degraded, it is simply unopenable.
 
-## 4. Listing clusters logs an ERROR for its own placeholder objects
+## 5. Listing clusters logs an ERROR for its own placeholder objects
 
 ```go
 // historyserver/pkg/storage/s3/s3.go:171-176
@@ -104,7 +127,7 @@ ignore real errors. Same pattern in the GCS, AzureBlob, and AliyunOSS readers.
 
 Fix: skip keys ending in `/` before decoding (or stop creating the placeholder).
 
-## 5. `GET /clusters` is an uncached full scan on every request
+## 6. `GET /clusters` is an uncached full scan on every request
 
 `MaxKeys=100` pagination over the whole `cluster-metadata/` prefix, with no
 caching (`s3.go:160-181`). Cost grows with the number of sessions **ever**
@@ -112,7 +135,7 @@ stored, independent of what the user is opening. It was 5–140 ms with a handfu
 of sessions here; at thousands of retained sessions it becomes the landing page's
 latency.
 
-## 6. Short jobs upload nothing until graceful shutdown
+## 7. Short jobs upload nothing until graceful shutdown
 
 With the default 5-minute rotation interval, a job that finishes sooner has all
 its events sitting on the collector's local disk. Measured, by diffing bucket
@@ -139,7 +162,7 @@ A related known gap is already flagged in the code: on SIGTERM the History
 Server cancels in-flight loads immediately and returns 500
 (`session_loader.go:79-82`, `TODO(jiangjiawei1103)`).
 
-## 7. Compression is off by default and costs nothing
+## 8. Compression is off by default and costs nothing
 
 Not a bug, but the default looks wrong given the data: gzip cut stored bytes by
 **91%** at every scale, with CPU per event unchanged (118–125 µs vs 115–124 µs)
