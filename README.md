@@ -313,6 +313,13 @@ python3 tools/gen_charts.py results/derived.csv docs/img
   the `logs/` category here is only ~45 B/task.
 - One head + one worker node. Per-node numbers generalize; cluster totals are a
   sum over nodes, not a measured scale-out.
+- **Every cell of every comparison here generated its own session**, so a
+  difference between two configurations mixes the configuration change with a
+  different set of objects, event counts and task losses. Two runs of the same
+  configuration at 100k differed by 10.7 s. The harness now has a
+  `BENCH_HS_ONLY` mode that measures repeatedly against one immutable stored
+  session; the numbers in this report predate it, so read the CPU curve as a
+  shape rather than a ranking.
 - Several numbers in `results/` are not measurements and are labelled as such:
   `A-n1000` (flush race in an early harness version — the fixed rerun is
   `rerun-A-n1000`), every run marked `collector_log_capture=no`, every

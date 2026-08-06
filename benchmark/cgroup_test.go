@@ -192,6 +192,7 @@ type CgroupUsage struct {
 
 // Summarize buckets samples into phases (via marks) per labeled container.
 // Unlabeled containers (infra pods etc.) are skipped.
+// A nil marks slice means the caller ran a single unphased measurement.
 func (c *cgroupSampler) Summarize(marks []phaseMark) []CgroupUsage {
 	c.mu.Lock()
 	defer c.mu.Unlock()

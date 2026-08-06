@@ -34,6 +34,8 @@ type Report struct {
 	StartedAt     time.Time          `json:"startedAt"`
 	Config        benchConfig        `json:"config"`
 	Env           EnvInfo            `json:"env"`
+	Namespace     string             `json:"namespace,omitempty"`
+	ClusterName   string             `json:"clusterName,omitempty"`
 	SessionID     string             `json:"sessionID"`
 	Job           JobResult          `json:"job"`
 	FlushDuration time.Duration      `json:"flushDuration"` // cluster deletion incl. final collector upload

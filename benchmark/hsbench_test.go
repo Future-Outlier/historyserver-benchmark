@@ -55,8 +55,8 @@ const shippedResources = `        resources:
 // BENCH_HS_CPU_LIMIT or BENCH_HS_ENV is set.
 //
 // The CPU limit matters twice over: it is the CFS quota, and since Go 1.25 the
-// runtime also derives GOMAXPROCS from it (never from requests), so "500m" also
-// means GOMAXPROCS=1. BENCH_HS_ENV exists to separate those two effects.
+// runtime also derives GOMAXPROCS from it (never from requests), rounding up but
+// never below 2 - so "500m" means GOMAXPROCS=2. BENCH_HS_ENV separates the two.
 func hsManifest(t *testing.T, runDir string, cfg benchConfig) string {
 	if cfg.HSCPULimit == "" && cfg.HSEnv == "" && cfg.HSArgs == "" {
 		return ""
@@ -271,4 +271,46 @@ func captureHSLogs(test Test, namespace, runDir string) *GCStats {
 		}
 	}
 	return stats
+}
+
+// runHSOnly measures a history server against a session that already exists in
+// the bucket, instead of generating a fresh one. Every cell of a CPU or runtime
+// comparison then reads byte-identical data, so the difference between two cells
+// is the configuration and not the session.
+//
+// The history server resolves everything from object-storage paths, so the
+// RayCluster the session came from does not need to exist, and this can run in a
+// throwaway namespace. Set BENCH_HS_ONLY=<namespace>/<cluster>/<sessionID> from a
+// prior run that used BENCH_SKIP_CLEANUP=1.
+func runHSOnly(t *testing.T, test Test, g *WithT, cfg benchConfig, runDir string) {
+	parts := strings.Split(cfg.HSOnly, "/")
+	if len(parts) != 3 {
+		t.Fatalf("BENCH_HS_ONLY must be <namespace>/<cluster>/<sessionID>, got %q", cfg.HSOnly)
+	}
+	sessionNamespace, clusterName, sessionID := parts[0], parts[1], parts[2]
+
+	report := &Report{Config: cfg, StartedAt: time.Now()}
+	report.Env = captureEnvInfo(test)
+	report.Namespace, report.ClusterName, report.SessionID = sessionNamespace, clusterName, sessionID
+
+	namespace := test.NewTestNamespace()
+	cgroups := newCgroupSampler(cfg.KindNode)
+	// One phase, named to match the full-run reports so derive.py and the charts
+	// read both modes the same way.
+	marks := []phaseMark{{Name: "historyserver", At: time.Now()}}
+	defer func() {
+		cgroups.Stop()
+		report.Cgroups = cgroups.Summarize(marks)
+		if err := cgroups.WriteCSV(filepath.Join(runDir, "cgroup_samples.csv")); err != nil {
+			t.Logf("write cgroup_samples.csv: %v", err)
+		}
+		writeReport(t, report, runDir)
+	}()
+	cgroups.Start(test)
+
+	ApplyHistoryServer(test, g, namespace, hsManifest(t, runDir, cfg))
+	cgroups.RegisterPods(test, namespace.Name)
+	hsURL := GetHistoryServerURL(test, g, namespace)
+	report.HistoryServer = runHSBench(t, g, hsURL, sessionNamespace, clusterName, sessionID, cfg)
+	report.HistoryServer.GC = captureHSLogs(test, namespace.Name, runDir)
 }

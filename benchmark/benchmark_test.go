@@ -42,6 +42,7 @@ type benchConfig struct {
 	HSCPULimit       string        // overrides the history server container CPU limit ("none" removes it); the shipped manifest pins 500m, which the cold load saturates
 	HSEnv            string        // extra env for the history server container, "K=V,K=V" (GOMAXPROCS, GODEBUG=gctrace=1, GOGC...)
 	HSArgs           string        // extra CLI flags for the history server, comma separated (e.g. --session-process-timeout=30m)
+	HSOnly           string        // "namespace/cluster/sessionID": skip generating data and measure the history server against a session already in the bucket
 	HSEnterTimeout   time.Duration // client budget for the first /enter_cluster attempt
 	HSWarmWait       time.Duration // total budget for warm-probe retries when the first attempt times out
 	OutDir           string        // report + CSV destination
@@ -65,6 +66,7 @@ func loadBenchConfig() benchConfig {
 		HSCPULimit:       envStr("BENCH_HS_CPU_LIMIT", ""),
 		HSEnv:            envStr("BENCH_HS_ENV", ""),
 		HSArgs:           envStr("BENCH_HS_ARGS", ""),
+		HSOnly:           envStr("BENCH_HS_ONLY", ""),
 		HSEnterTimeout:   envDuration("BENCH_HS_ENTER_TIMEOUT", 5*time.Minute),
 		HSWarmWait:       envDuration("BENCH_HS_WARM_WAIT", 15*time.Minute),
 		OutDir:           envStr("BENCH_OUT_DIR", "out"),
@@ -82,11 +84,20 @@ func TestHistoryServerBenchmark(t *testing.T) {
 		t.Fatalf("create output dir %s: %v", runDir, err)
 	}
 
+	test := With(t)
+	g := NewWithT(t)
+
+	// Same-session mode: every cell of a comparison should read byte-identical
+	// data, otherwise a difference between two history server configurations is
+	// confounded with a difference between two generated sessions.
+	if cfg.HSOnly != "" {
+		runHSOnly(t, test, g, cfg, runDir)
+		return
+	}
+
 	s3Client := ensureBenchS3Client(t, cfg.S3LocalPort)
 	stopWatchdog := startS3Watchdog(t, s3Client, S3BucketName, cfg.S3LocalPort)
 	defer stopWatchdog()
-	test := With(t)
-	g := NewWithT(t)
 	namespace := test.NewTestNamespace()
 
 	report := &Report{Config: cfg, StartedAt: time.Now()}
@@ -120,6 +131,10 @@ func TestHistoryServerBenchmark(t *testing.T) {
 
 	sessionID := GetSessionIDFromHeadPod(test, g, rayCluster)
 	report.SessionID = sessionID
+	report.Namespace = namespace.Name
+	report.ClusterName = rayCluster.Name
+	t.Logf("BENCH_HS_ONLY=%s/%s/%s  (re-measure this exact session with BENCH_SKIP_CLEANUP=1 data)",
+		namespace.Name, rayCluster.Name, sessionID)
 	sessionPrefix := clusterlogs.SessionDir("log", "", "", namespace.Name, rayCluster.Name, sessionID) + "/"
 	markerKey := clustermetadata.EncodePath(
 		utils.ClusterInfo{Namespace: namespace.Name, Name: rayCluster.Name}, "log", sessionID)
