@@ -92,3 +92,7 @@ cluster shape.
 | Task loss | Distinct `TASK_DEFINITION_EVENT` task IDs scoped to the benchmark job | Counting across all jobs would hide losses behind the submitter's own tasks |
 | Collector backpressure | Followed container logs, including after termination | Uploads mostly happen during drain; a pre-deletion scrape sees none of them |
 | HS cold load | Wall clock on `GET /enter_cluster`; on timeout, re-probe until the warm hit lands | The server keeps loading after the client gives up (singleflight), so the first warm hit upper-bounds the true load time |
+
+The History Server is deployed from KubeRay's own sample manifest, which caps it
+at `500m` of CPU. That cap is part of what the benchmark measures — see
+[FINDINGS.md](FINDINGS.md) — and `BENCH_HS_CPU_LIMIT` varies it.
