@@ -52,7 +52,8 @@ Two facts shape every measurement:
 
 One RayCluster (1 head + 1 worker, 2 CPU each) and one RayJob whose driver
 submits `N` no-op tasks in waves of 2,000, then sleeps so the event queues drain
-before the driver exits:
+before the driver exits. The head is started with `num-cpus: "0"`, the usual
+KubeRay practice, so **no task executes on it** — it only hosts the driver:
 
 ```python
 @ray.remote(num_cpus=0.2)

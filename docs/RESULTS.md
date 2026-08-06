@@ -19,13 +19,24 @@ At N = 50,000 the bucket held 218,214 events:
 or three times depending on how state transitions batch), **725 B per event**
 raw (707–745), independent of N.
 
-Events split across nodes almost evenly, because each task's lifecycle is
-recorded twice — once by its owner on the head, once by its executor:
+Events split across nodes almost evenly — **even though the head runs no tasks
+at all.** It is started with `num-cpus: "0"`, so every task executes on the
+worker, and the split comes from roles rather than placement: the driver on the
+head *owns* every task, and the worker *executes* them.
 
-| Node | Events | Raw bytes | Peak 10 s rate |
-|---|---:|---:|---:|
-| head | 118,177 (54%) | 87.8 MiB | 7,485/s |
-| worker | 100,037 (46%) | 63.2 MiB | 6,433/s |
+| Event type | head (`num-cpus: 0`) | worker |
+|---|---:|---:|
+| `TASK_DEFINITION` (owner) | 50,005 | 0 |
+| `TASK_LIFECYCLE` (both sides) | 68,117 | 50,032 |
+| `TASK_PROFILE` (executor) | 40 | 50,005 |
+| **total** | **118,177 (54%)** | **100,037 (46%)** |
+| raw bytes | 87.8 MiB | 63.2 MiB |
+| peak 10 s rate | 7,485/s | 6,433/s |
+
+The 40 profile events on the head are the driver's own bookkeeping. The
+practical consequence: **a head collector's load scales with tasks *owned* by
+drivers there, not with tasks executed there** — excluding the head from
+scheduling does not make its collector cheap.
 
 ## Storage
 

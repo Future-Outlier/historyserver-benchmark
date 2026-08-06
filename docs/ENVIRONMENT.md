@@ -45,12 +45,14 @@ Digests are recorded per matrix run in `results/matrix-20260805/images.txt`.
 ## RayCluster shape
 
 ```
-head group    1 pod   ray-head    2 CPU / 4G      + collector sidecar
-worker group  1 pod   ray-worker  2 CPU / 2G      + collector sidecar
+head group    1 pod   ray-head    2 CPU / 4G   num-cpus: "0"   + collector sidecar
+worker group  1 pod   ray-worker  2 CPU / 2G                   + collector sidecar
 ```
 
-Both pods run a `collector` sidecar; the head's is not optional, since roughly
-half of all task events are emitted by the owner process on the head node.
+The head is started with `num-cpus: "0"`, so **no task runs on it** — it hosts
+the driver only. It still emits 54% of all events (every `TASK_DEFINITION`, plus
+the owner half of every `TASK_LIFECYCLE`), which is why its collector is not
+optional and should not be sized smaller than a worker's.
 
 Ray container memory in these runs peaked at 2.1–3.5 GiB on the head (it grows
 ~7 KiB per task from Ray's own task metadata) and stayed under the worker's 2G

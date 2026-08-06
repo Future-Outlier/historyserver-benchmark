@@ -48,8 +48,11 @@ cache from its own spool files reached 251 MiB at 100k tasks. Page cache is
 reclaimable, so 256Mi would not OOM — it would just keep the container
 permanently in reclaim.
 
-**Do not skip the head's collector.** The head node produced 54% of all events,
-because task lifecycle is recorded by the owner as well as the executor.
+**Do not skip the head's collector, and do not size it smaller.** In these runs
+the head was started with `num-cpus: "0"` — no task executed on it — and it still
+produced **54% of all events**, because the driver that owns every task lives
+there. A head collector's load tracks tasks *owned* by drivers on that node, not
+tasks executed on it, so excluding the head from scheduling does not reduce it.
 
 ### Disk
 
@@ -176,7 +179,7 @@ which scales with the un-uploaded backlog).
 
 ```
 [ ] Collector CPU sized from peak tasks/s per NODE, not from cluster totals
-[ ] Head pod's collector sized the same as workers (it sees ~54% of events)
+[ ] Head pod's collector sized the same as workers (54% of events even with num-cpus: 0)
 [ ] Collector memory limit >= 512Mi (page cache from its own spool files)
 [ ] Compression enabled
 [ ] History Server memory >= 23 KiB x largest session x sessions cached

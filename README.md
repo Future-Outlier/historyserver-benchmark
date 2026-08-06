@@ -28,6 +28,46 @@ HS RSS   M ≈ 100 MiB + N × 23 KiB  per session held in the snapshot cache
 
 ---
 
+## Change these two things first
+
+**1. Give the History Server real CPU.** `historyserver/config/historyserver.yaml`
+sets only `limits.cpu: "500m"`, so Kubernetes pins `requests.cpu` there too, and
+the cold load saturates it — 0.42–0.50 cores for the entire load, in every run.
+
+```yaml
+resources:
+  requests:
+    cpu: "500m"
+  limits:
+    cpu: "4"      # was "500m"
+```
+
+100k tasks: **907 s → 62.7 s**. 50k tasks: 97.9 s → 30.5 s. The load uses ~1.2
+cores sustained and bursts to 2.2, so `2` captures most of the win if 4 is too
+much to reserve.
+
+**2. Turn compression on.** `RAY_COLLECTOR_EVENT_COMPRESSION_ENABLED=true` on the
+collector sidecars cuts stored bytes by **91%** (3.15 KiB → 0.29 KiB per task)
+with no measurable CPU or load-time cost. It is off by default.
+
+Everything else worth configuring is in [docs/SIZING.md](docs/SIZING.md); the two
+above are the ones with no downside.
+
+### And one that needs a code change
+
+Every cold load writes one INFO line per event (`eventserver.go:136`, called from
+the per-event loop at `:1164`) — 436,000 lines for a 100k-task session, with no
+log-level flag to turn them off:
+
+```go
+logrus.Debugf("current eventType: %v", eventType)   // was Infof
+```
+
+Worth 13% at 50k (97.9 s → 85.3 s). Note it does **not** fix the 100k case — that
+was the CPU limit, as the charts below show.
+
+---
+
 ## Storage
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/storage-per-task-dark.svg"><img alt="Storage cost per task: 3.15 KiB raw vs 0.29 KiB gzipped, constant from 1k to 100k tasks" src="docs/img/storage-per-task-light.svg"></picture>
@@ -98,6 +138,12 @@ Memory is flat because the collector streams to disk and uploads in the
 background — events never accumulate in its heap. Backpressure (503 to the Ray
 aggregator) never engaged in any run.
 
+**Size the head's collector like a worker's.** The head ran `num-cpus: "0"` — not
+a single task executed there — and it still produced **54% of all events**, because
+the driver that *owns* every task lives there. Owner-side events (all 50,005
+`TASK_DEFINITION`s plus 68,117 of the 118,149 `TASK_LIFECYCLE`s) do not care where
+the task ran.
+
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/rate-vs-concurrency-dark.svg"><img alt="Raising task concurrency from 4 to 40 per node lowered throughput and left event rate flat" src="docs/img/rate-vs-concurrency-light.svg"></picture>
 
 Raising task concurrency 10× did **not** raise the event rate — for small tasks
@@ -107,17 +153,15 @@ replica count; only from tasks/s per node.
 
 ---
 
-## What to configure
+## Sizing everything else
 
 | | Recommendation | Why |
 |---|---|---|
 | Collector CPU | `requests: R × 0.52 millicores`, `limits:` 3× that (R = sustained tasks/s **per node**) | 120 µs/event × 4.36 events/task; bursts run 2–4× the sustained average |
 | Collector memory | `requests: 128Mi`, `limits: 512Mi` | heap is flat at ~120 MiB; cgroup total incl. page cache hits 251 MiB |
-| Compression | turn it **on** | 91% smaller, no measurable cost |
-| History Server CPU | **`limits.cpu: 4`** — the sample manifest ships `500m` | 14.5× faster at 100k; the load wants ~1.2 cores sustained and bursts to 2.2 |
 | History Server memory | `100 MiB + 23 KiB × N × sessions cached` | snapshots are retained in the LRU |
-| `--session-process-timeout` | `N × 2 ms × 2` | the 2-minute default implies a ~60k-task ceiling |
-| Session size | keep under ~50k tasks | beyond that, load time degrades superlinearly |
+| `--session-process-timeout` | `N × 0.62 ms × 2` | with adequate CPU the 2-minute default already covers ~190k tasks |
+| Session size | under ~56k tasks, until `WriteTimeout` is configurable | a load over 35 s cannot deliver any response to an HTTP/1 client |
 
 Full derivation and worked examples: **[docs/SIZING.md](docs/SIZING.md)**.
 
