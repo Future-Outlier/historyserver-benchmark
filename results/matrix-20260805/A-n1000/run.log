@@ -1,0 +1,139 @@
+=== RUN   TestHistoryServerBenchmark
+    s3.go:31: [2026-08-05T17:56:04-05:00] Successfully applied ../../config/minio.yaml to namespace minio-dev
+    s3.go:63: [2026-08-05T17:56:09-05:00] Port-forwarded MinIO API port to localhost:9000 successfully
+    cluster_test.go:52: [2026-08-05T17:56:09-05:00] Created RayCluster test-ns-qjzg4/raycluster-historyserver
+    core.go:88: [2026-08-05T17:57:40-05:00] Executing command: [sh -c ray_tmp_root="${RAY_TMP_ROOT:-/tmp/ray}"
+        if [ -L "${ray_tmp_root}/session_latest" ]; then
+          session_path=$(readlink "${ray_tmp_root}/session_latest")
+          basename "$session_path"
+        else
+          echo "session_latest is not a symlink"
+          exit 1
+        fi]
+    core.go:101: [2026-08-05T17:57:40-05:00] Command stdout: session_2026-08-05_15-56-35_176478_1
+    core.go:102: [2026-08-05T17:57:40-05:00] Command stderr: 
+    raycluster.go:119: [2026-08-05T17:57:40-05:00] Retrieved sessionID: session_2026-08-05_15-56-35_176478_1
+    rayjob_test.go:86: [2026-08-05T17:57:40-05:00] Created RayJob test-ns-qjzg4/rayjob-bench (1000 tasks, wave 2000)
+    rayjob_test.go:105: [2026-08-05T17:58:05-05:00] RayJob done: wall=25s driver_rate=920.9 tasks/s
+    historyserver.go:326: [2026-08-05T17:58:06-05:00] Deleted RayCluster test-ns-qjzg4/raycluster-historyserver
+    historyserver.go:333: [2026-08-05T17:58:06-05:00] RayCluster test-ns-qjzg4/raycluster-historyserver fully deleted
+    benchmark_test.go:147: session marker did not appear after flush: object log/cluster-metadata/raycluster/test-ns-qjzg4_raycluster-historyserver/session_2026-08-05_15-56-35_176478_1 not visible within 2m0s: RequestError: send request failed
+        caused by: Head "http://localhost:9000/ray-historyserver/log/cluster-metadata/raycluster/test-ns-qjzg4_raycluster-historyserver/session_2026-08-05_15-56-35_176478_1": dial tcp [::1]:9000: connect: connection refused (data-loss finding if events are also missing)
+    benchmark_test.go:154: 
+        Unexpected error:
+            <*awserr.baseError | 0x30c35ba5b240>: 
+            RequestError: send request failed
+            caused by: Get "http://localhost:9000/ray-historyserver?list-type=2": dial tcp [::1]:9000: connect: connection refused
+            {
+                code: "RequestError",
+                message: "send request failed",
+                errs: [
+                    <*url.Error | 0x30c35b7928a0>{
+                        Op: "Get",
+                        URL: "http://localhost:9000/ray-historyserver?list-type=2",
+                        Err: <*net.OpError | 0x30c35b8af270>{
+                            Op: "dial",
+                            Net: "tcp",
+                            Source: nil,
+                            Addr: <*net.TCPAddr | 0x30c35b792780>{
+                                IP: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                                Port: 9000,
+                                Zone: "",
+                            },
+                            Err: <*os.SyscallError | 0x30c35b497200>{
+                                Syscall: "connect",
+                                Err: <syscall.Errno>0x3d,
+                            },
+                        },
+                    },
+                ],
+            }
+        occurred
+    report_test.go:78: benchmark report written to /Users/future-outlier/code/ray-project/kuberay/.claude/worktrees/benchmark/historyserver/test/benchmark/out/matrix-20260805-175509/A-n1000/20260805-175603
+        # History Server Benchmark Report
+        
+        - Date: 2026-08-05T17:56:09-05:00
+        - Tasks: 1000 (wave 2000, num_cpus=0.2), compression=false
+        - Node bench-control-plane: v1.33.1, Debian GNU/Linux 12 (bookworm), cpu=14, mem=32813556Ki
+        - Session: `session_2026-08-05_15-56-35_176478_1`
+        
+        ## Load generation
+        
+        | metric | value |
+        |---|---|
+        | RayJob wall clock (k8s-observed) | 25s |
+        | driver-measured wall | 1.1s |
+        | driver-measured rate | 920.9 tasks/s |
+        | flush (cluster deletion incl. final upload) | 2m3s |
+        
+        ## Collector
+        
+        | pod | uploads | uploaded bytes | disk-pressure 503s | queue-full | upload failures |
+        |---|---|---|---|---|---|
+        | raycluster-historyserver-cpu-worker-flxxs | 0 | 0 B | 0 | 0 | 0 |
+        | raycluster-historyserver-head-wtnjg | 0 | 0 B | 0 | 0 | 0 |
+        
+        ## Container resources — kubelet summary API (working_set, k8s semantics, ~10s)
+        
+        | class | phase | samples | peak working set (MiB) | avg cores | peak cores |
+        |---|---|---|---|---|---|
+        | collector (head) | job | 25 | 73.3 | 0.031 | 0.031 |
+        | collector (worker) | job | 25 | 63.3 | 0.018 | 0.018 |
+        | ray-head | job | 25 | 2009.2 | 0.172 | 0.241 |
+        | ray-worker | job | 25 | 421.7 | 0.165 | 0.165 |
+        
+        ## Container resources — cgroup v2 direct (anon = pure heap, 1s; lifetime peak = kernel memory.peak)
+        
+        | container | phase | samples | peak anon (MiB) | peak current (MiB) | avg cores | peak cores | lifetime peak (MiB) |
+        |---|---|---|---|---|---|---|---|
+        | raycluster-historyserver-cpu-worker-flxxs/collector | flush | 1 | 65.5 | 66.6 | 0.065 | 0.065 |  |
+        | raycluster-historyserver-cpu-worker-flxxs/collector | job | 24 | 62.5 | 64.7 | 0.012 | 0.268 |  |
+        | raycluster-historyserver-cpu-worker-flxxs/collector | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 68.8 |
+        | raycluster-historyserver-cpu-worker-flxxs/ray-worker | flush | 1 | 102.6 | 114.4 | 0.101 | 0.101 |  |
+        | raycluster-historyserver-cpu-worker-flxxs/ray-worker | job | 24 | 559.8 | 588.3 | 0.140 | 2.036 |  |
+        | raycluster-historyserver-cpu-worker-flxxs/ray-worker | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 624.9 |
+        | raycluster-historyserver-head-wtnjg/collector | flush | 1 | 73.5 | 76.7 | 0.074 | 0.074 |  |
+        | raycluster-historyserver-head-wtnjg/collector | job | 24 | 72.4 | 75.2 | 0.017 | 0.357 |  |
+        | raycluster-historyserver-head-wtnjg/collector | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 77.1 |
+        | raycluster-historyserver-head-wtnjg/ray-head | flush | 1 | 1547.8 | 1594.9 | 0.208 | 0.208 |  |
+        | raycluster-historyserver-head-wtnjg/ray-head | job | 24 | 2097.0 | 2155.6 | 0.165 | 1.021 |  |
+        | raycluster-historyserver-head-wtnjg/ray-head | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 2159.3 |
+        
+        ## Storage footprint (session prefix)
+        
+        | category | bytes | share |
+        |---|---|---|
+        | **total** | **0 B** | (0 objects) |
+        
+        - Session marker present: false
+        
+        ## Event statistics
+        
+        | metric | value |
+        |---|---|
+        | total events | 0 |
+        | task-scoped events (TASK_* + ACTOR_TASK_*) | 0 |
+        | events per task (k) | 0.00 |
+        | raw JSONL bytes | 0 B |
+        | stored event bytes | 0 B |
+        | avg raw bytes/event | 0 |
+        | compression ratio (stored/raw) | 0.000 |
+        | distinct taskDefinitionEvent taskIds | 0 / 0 expected |
+        
+        | event type | count |
+        |---|---|
+        
+        ## History server
+        
+        | metric | value |
+        |---|---|
+        | GET /clusters p50 / p95 / max | 0s / 0s / 0s (errors: 0) |
+        | /enter_cluster cold load | 0s (HTTP 0) |
+        
+    test.go:114: [2026-08-05T18:00:09-05:00] Retrieving Pod Container test-ns-qjzg4/rayjob-bench-tdsnx/ray-job-submitter logs
+    test.go:102: [2026-08-05T18:00:09-05:00] Creating ephemeral output directory as KUBERAY_TEST_OUTPUT_DIR env variable is unset
+    test.go:105: [2026-08-05T18:00:09-05:00] Output directory has been created at: /var/folders/3z/bsm4cddd4q18b_jc_2b2my4h0000gn/T/TestHistoryServerBenchmark1603901442/001
+--- FAIL: TestHistoryServerBenchmark (245.63s)
+FAIL
+FAIL	github.com/ray-project/kuberay/historyserver/test/benchmark	246.175s
+FAIL

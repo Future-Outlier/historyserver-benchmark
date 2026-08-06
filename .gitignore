@@ -1,0 +1,6 @@
+out/
+kubeconfig*
+*.kubeconfig
+kuberay-operator
+operator.log
+.DS_Store

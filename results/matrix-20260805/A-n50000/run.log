@@ -1,0 +1,156 @@
+=== RUN   TestHistoryServerBenchmark
+    s3.go:31: [2026-08-05T18:03:06-05:00] Successfully applied ../../config/minio.yaml to namespace minio-dev
+    s3.go:63: [2026-08-05T18:03:06-05:00] Port-forwarded MinIO API port to localhost:9000 successfully
+    cluster_test.go:52: [2026-08-05T18:03:06-05:00] Created RayCluster test-ns-8tvmc/raycluster-historyserver
+    core.go:88: [2026-08-05T18:03:27-05:00] Executing command: [sh -c ray_tmp_root="${RAY_TMP_ROOT:-/tmp/ray}"
+        if [ -L "${ray_tmp_root}/session_latest" ]; then
+          session_path=$(readlink "${ray_tmp_root}/session_latest")
+          basename "$session_path"
+        else
+          echo "session_latest is not a symlink"
+          exit 1
+        fi]
+    core.go:101: [2026-08-05T18:03:27-05:00] Command stdout: session_2026-08-05_16-03-08_488728_1
+    core.go:102: [2026-08-05T18:03:27-05:00] Command stderr: 
+    raycluster.go:119: [2026-08-05T18:03:27-05:00] Retrieved sessionID: session_2026-08-05_16-03-08_488728_1
+    rayjob_test.go:86: [2026-08-05T18:03:28-05:00] Created RayJob test-ns-8tvmc/rayjob-bench (50000 tasks, wave 2000)
+    rayjob_test.go:105: [2026-08-05T18:04:08-05:00] RayJob done: wall=40s driver_rate=2855.3 tasks/s
+    historyserver.go:326: [2026-08-05T18:04:08-05:00] Deleted RayCluster test-ns-8tvmc/raycluster-historyserver
+    historyserver.go:333: [2026-08-05T18:04:08-05:00] RayCluster test-ns-8tvmc/raycluster-historyserver fully deleted
+    historyserver.go:109: [2026-08-05T18:04:12-05:00] Successfully applied ../../config/historyserver.yaml to namespace test-ns-8tvmc
+    historyserver.go:111: [2026-08-05T18:04:12-05:00] Waiting for HistoryServer to be ready
+    historyserver.go:122: [2026-08-05T18:04:14-05:00] HistoryServer is ready
+    historyserver.go:145: [2026-08-05T18:04:15-05:00] Port-forwarded HistoryServer API port to http://localhost:30080 successfully
+    hsbench_test.go:63: enter_cluster cold load took 1m37.847s
+    s3.go:88: [2026-08-05T18:06:17-05:00] Deleting S3 bucket ray-historyserver
+    s3.go:128: [2026-08-05T18:06:17-05:00] Deleted S3 bucket ray-historyserver successfully
+    report_test.go:78: benchmark report written to /Users/future-outlier/code/ray-project/kuberay/.claude/worktrees/benchmark/historyserver/test/benchmark/out/matrix-20260805-175509/A-n50000/20260805-180306
+        # History Server Benchmark Report
+        
+        - Date: 2026-08-05T18:03:06-05:00
+        - Tasks: 50000 (wave 2000, num_cpus=0.2), compression=false
+        - Node bench-control-plane: v1.33.1, Debian GNU/Linux 12 (bookworm), cpu=14, mem=32813556Ki
+        - Session: `session_2026-08-05_16-03-08_488728_1`
+        
+        ## Load generation
+        
+        | metric | value |
+        |---|---|
+        | RayJob wall clock (k8s-observed) | 40s |
+        | driver-measured wall | 17.5s |
+        | driver-measured rate | 2855.3 tasks/s |
+        | flush (cluster deletion incl. final upload) | 3s |
+        
+        ## Collector
+        
+        | pod | uploads | uploaded bytes | disk-pressure 503s | queue-full | upload failures |
+        |---|---|---|---|---|---|
+        | raycluster-historyserver-cpu-worker-vpxmw | 0 | 0 B | 0 | 0 | 0 |
+        | raycluster-historyserver-head-2sqj2 | 0 | 0 B | 0 | 0 | 0 |
+        
+        ## Container resources — kubelet summary API (working_set, k8s semantics, ~10s)
+        
+        | class | phase | samples | peak working set (MiB) | avg cores | peak cores |
+        |---|---|---|---|---|---|
+        | collector (head) | flush | 1 | 97.8 | 0.000 | 0.000 |
+        | collector (head) | job | 40 | 133.0 | 0.425 | 0.644 |
+        | collector (worker) | flush | 1 | 110.9 | 0.000 | 0.000 |
+        | collector (worker) | job | 40 | 115.3 | 0.293 | 0.647 |
+        | historyserver | historyserver | 125 | 952.6 | 0.490 | 0.515 |
+        | ray-head | job | 40 | 2903.1 | 0.840 | 0.908 |
+        | ray-worker | job | 40 | 804.5 | 1.650 | 2.014 |
+        
+        ## Container resources — cgroup v2 direct (anon = pure heap, 1s; lifetime peak = kernel memory.peak)
+        
+        | container | phase | samples | peak anon (MiB) | peak current (MiB) | avg cores | peak cores | lifetime peak (MiB) |
+        |---|---|---|---|---|---|---|---|
+        | historyserver-demo-7f67bfd478-6ffn5/historyserver | historyserver | 121 | 1131.7 | 1173.6 | 0.490 | 0.535 |  |
+        | historyserver-demo-7f67bfd478-6ffn5/historyserver | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 1187.6 |
+        | raycluster-historyserver-cpu-worker-vpxmw/collector | flush | 1 | 110.3 | 176.4 | 0.817 | 0.817 |  |
+        | raycluster-historyserver-cpu-worker-vpxmw/collector | job | 39 | 113.7 | 174.1 | 0.288 | 1.052 |  |
+        | raycluster-historyserver-cpu-worker-vpxmw/collector | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 179.9 |
+        | raycluster-historyserver-cpu-worker-vpxmw/ray-worker | job | 39 | 967.7 | 1007.6 | 0.984 | 2.117 |  |
+        | raycluster-historyserver-cpu-worker-vpxmw/ray-worker | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 1021.1 |
+        | raycluster-historyserver-head-2sqj2/collector | flush | 1 | 94.0 | 185.9 | 0.804 | 0.804 |  |
+        | raycluster-historyserver-head-2sqj2/collector | job | 39 | 144.6 | 218.3 | 0.407 | 1.172 |  |
+        | raycluster-historyserver-head-2sqj2/collector | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 230.7 |
+        | raycluster-historyserver-head-2sqj2/ray-head | job | 39 | 2869.3 | 2933.9 | 0.671 | 2.268 |  |
+        | raycluster-historyserver-head-2sqj2/ray-head | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 2939.0 |
+        | rayjob-bench-mc7hd/ray-job-submitter | job | 35 | 97.6 | 108.1 | 0.070 | 0.935 |  |
+        | rayjob-bench-mc7hd/ray-job-submitter | lifetime | 0 | 0.0 | 0.0 | 0.000 | 0.000 | 110.4 |
+        
+        ## Storage delta (bucket snapshots)
+        
+        | window | added objs | added bytes | changed objs | changed bytes | deleted objs |
+        |---|---|---|---|---|---|
+        | during-job (T1-T0) | 0 | 0 B | 0 | 0 B | 0 |
+        | flush (T2-T1) | 172 | 153.33 MiB | 0 | 0 B | 0 |
+        
+        
+        ## Storage footprint (session prefix)
+        
+        | category | bytes | share |
+        |---|---|---|
+        | fetched_endpoints | 475 B | 0.0% |
+        | job_events | 150.90 MiB | 98.4% |
+        | logs | 2.42 MiB | 1.6% |
+        | node_events | 6.90 KiB | 0.0% |
+        | **total** | **153.33 MiB** | (173 objects) |
+        
+        - Session marker present: true
+        
+        ## Event statistics
+        
+        | metric | value |
+        |---|---|
+        | total events | 218214 |
+        | task-scoped events (TASK_* + ACTOR_TASK_*) | 218200 |
+        | events per task (k) | 4.36 |
+        | raw JSONL bytes | 150.91 MiB |
+        | stored event bytes | 150.91 MiB |
+        | avg raw bytes/event | 725 |
+        | compression ratio (stored/raw) | 1.000 |
+        | distinct taskDefinitionEvent taskIds | 50005 / 50000 expected |
+        
+        ### Per-node attribution (whose aggregator emitted the events)
+        
+        | node | events | raw bytes | distinct taskIds | peak 1s events | peak 10s-avg events/s |
+        |---|---|---|---|---|---|
+        | 2450ba751774344b218a65a3b171d94208899e5f64595d4c7a8d89b9 | 118177 | 87.76 MiB | 50006 | 9943 | 7484.6 |
+        | 2fae99d61695221e03ac523f63f1aa960c02996ec7a6dfe1f4d9cc2c | 100037 | 63.15 MiB | 50000 | 7238 | 6432.6 |
+        
+        | event type | count |
+        |---|---|
+        | ACTOR_DEFINITION_EVENT | 2 |
+        | ACTOR_LIFECYCLE_EVENT | 5 |
+        | ACTOR_TASK_DEFINITION_EVENT | 1 |
+        | DRIVER_JOB_DEFINITION_EVENT | 1 |
+        | DRIVER_JOB_LIFECYCLE_EVENT | 2 |
+        | NODE_DEFINITION_EVENT | 2 |
+        | NODE_LIFECYCLE_EVENT | 2 |
+        | TASK_DEFINITION_EVENT | 50005 |
+        | TASK_LIFECYCLE_EVENT | 118149 |
+        | TASK_PROFILE_EVENT | 50045 |
+        
+        ## History server
+        
+        | metric | value |
+        |---|---|
+        | GET /clusters p50 / p95 / max | 5ms / 142ms / 142ms (errors: 0) |
+        | /enter_cluster cold load | 1m37.847s (HTTP 200) |
+        
+        | warm endpoint | p50 | p95 | max | resp bytes | errors |
+        |---|---|---|---|---|---|
+        | /api/v0/tasks?limit=50000 | 0s | 0s | 0s | 0 B | 10 |
+        | /api/v0/tasks/summarize | 2.286s | 3.49s | 3.49s | 408 B | 0 |
+        | /api/jobs/ | 46ms | 542ms | 542ms | 1.22 KiB | 0 |
+        | /nodes?view=summary | 89ms | 587ms | 587ms | 2.76 KiB | 0 |
+        | /events | 38ms | 598ms | 598ms | 2.13 KiB | 0 |
+        
+    test.go:114: [2026-08-05T18:06:17-05:00] Retrieving Pod Container test-ns-8tvmc/historyserver-demo-7f67bfd478-6ffn5/historyserver logs
+    test.go:102: [2026-08-05T18:06:18-05:00] Creating ephemeral output directory as KUBERAY_TEST_OUTPUT_DIR env variable is unset
+    test.go:105: [2026-08-05T18:06:18-05:00] Output directory has been created at: /var/folders/3z/bsm4cddd4q18b_jc_2b2my4h0000gn/T/TestHistoryServerBenchmark685695185/001
+    test.go:114: [2026-08-05T18:06:18-05:00] Retrieving Pod Container test-ns-8tvmc/rayjob-bench-mc7hd/ray-job-submitter logs
+--- PASS: TestHistoryServerBenchmark (191.69s)
+PASS
+ok  	github.com/ray-project/kuberay/historyserver/test/benchmark	192.218s
