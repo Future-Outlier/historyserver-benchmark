@@ -2,219 +2,163 @@
 
 Measurements behind **"Ray History Server: Bridging the Impossible Gaps in Observability"** (Ray Summit 2026, slides 16–22).
 
-Two components, two different sizing rules. This page is the evidence: every chart from the slides, the numbers behind each one, and the code to run it again. [`benchmark/`](benchmark) holds the charts, the data, and the reproduce code.
-
-**For you if** you are deciding how much CPU and memory these two components need in Kubernetes.
-
----
+Two components, two sizing rules. Charts, the data behind them, and the code to run it again — all in [`benchmark/`](benchmark).
 
 ## The short version
 
-| | Collector (one per Ray node) | History Server (one service) |
+| | Collector (per Ray node) | History Server |
 |---|---|---|
-| **What it does** | catches events from a Ray node, writes them to local disk, ships them to object storage | loads a finished session back from storage so people can look at it |
-| **CPU driven by** | events per second arriving | one-off bursts: opening a session, answering a query |
+| **CPU driven by** | events/s arriving | bursts: opening a session, answering a query |
 | **CPU cost** | ~20 mCPU per 1,000 events/s | 4.98 CPU-seconds to open a 50,000-task session |
-| **Memory driven by** | bytes still waiting on local disk | tasks in the session you opened |
-| **Memory cost** | mostly disk cache the kernel can drop; the program itself stays at 21–26 MiB | ~27 KiB per task, on top of a ~37 MiB floor |
-| **Question to ask** | "how much piles up between uploads?" | "how big is the biggest session anyone opens?" |
+| **Memory driven by** | bytes still on local disk | tasks in the session opened |
+| **Memory cost** | 21–26 MiB program + disk cache the kernel can drop | ~27 KiB per task + a ~37 MiB floor |
+| **Question to ask** | "how much piles up between uploads?" | "how big is the biggest session?" |
 
-**1. The Collector's memory number is not the Collector.** At 5,000 events/s the container showed ~160 MiB — only ~25 MiB was the program. The rest was Linux caching the on-disk file. Shrink the limit and the kernel drops that cache; the program does not crash.
+**The Collector's memory number is not the Collector.** At 5,000 events/s the container showed ~160 MiB — only ~25 MiB was the program; the rest was Linux caching the on-disk file.
 
-**2. The History Server is boringly predictable.** Load time = `84 µs × tasks`, R² = 0.9999 across a 50× range. No cliff.
+**Every memory number counts the whole container**, cache included — that is what Kubernetes OOM-kills you for.
 
-**3. Every memory number counts the whole container**, cache included — because that is what Kubernetes OOM-kills you for.
+## How it was measured
 
-<details>
-<summary><b>Terms used on this page</b></summary>
-
-| Term | Meaning |
-|---|---|
-| **mCPU** | thousandths of a core. `100m` = 10% of one core. |
-| **request vs limit** | *request* = what you reserve (decides scheduling). *limit* = hard ceiling. Over the CPU limit you get slowed; over the memory limit you get killed. |
-| **heap / "anon"** | memory the program allocated for itself. |
-| **page cache / "file"** | a copy of a disk file Linux keeps in RAM. Counts against your limit, but the kernel can drop it anytime. |
-| **peak** | the highest the container ever reached. Not an average. This is what kills you. |
-| **p95 / p99** | the value 95% (or 99%) of samples came in under. |
-| **R²** | how straight a line is. Above 0.99 means the formula is trustworthy. |
-| **spool** | the file on the Collector's local disk where events pile up before upload. |
-| **cold load** | opening a session with nothing cached. The slow path. |
-
-</details>
-
----
-
-## How things were measured
-
-| | Collector campaign | History Server campaign |
+| | Collector | History Server |
 |---|---|---|
-| Workload | event generator at a fixed rate, 90 s of traffic | one pre-built session, opened and queried |
-| Sizes tested | 1,000 / 2,000 / 3,000 / 5,000 events/s | 1,000 / 5,000 / 10,000 / 50,000 tasks |
-| Repeats | 3 fresh Pods per size | 5 fresh Pods per size |
-| Event size | 895 bytes (exact, campaign-wide) | — |
-| Pod settings | CPU request 100m / limit 2000m; memory limit varies | CPU request 1 / limit 2; memory request 1Gi / limit 12Gi |
-| Go runtime | — | `GOMAXPROCS=2`, pinned on purpose |
-| Counters | Linux cgroup v2, memory split into program / cache / kernel | same |
+| Workload | fixed event rate, 90 s | one pre-built session, opened and queried |
+| Sizes | 1,000 / 2,000 / 3,000 / 5,000 events/s | 1,000 / 5,000 / 10,000 / 50,000 tasks |
+| Repeats | 3 fresh Pods | 5 fresh Pods |
+| Pod | CPU 100m / 2000m; memory limit varies | CPU 1 / 2; memory 1Gi / 12Gi, `GOMAXPROCS=2` |
+| Counters | cgroup v2, memory split program / cache / kernel | same |
 
-Dedicated test cluster, one fresh Pod per test, nothing else running beside it.
+Dedicated cluster, one fresh Pod per test. Between History Server requests the container must go quiet (three intervals under 50 mCPU) or the test fails rather than sending the next one.
 
-**Why per-request CPU is attributable.** Between requests the test waits for the container to go quiet — three consecutive intervals under 50 mCPU — or fails rather than sending the next request anyway.
-
-**The Collector campaign's books balance exactly.** Across 27 runs: 7,650,000 events planned = sent = accepted = found in storage. 6,846,750,000 bytes written and confirmed, exactly 895.0 bytes/event, compressing **10.85 : 1**. Zero duplicates, corrupt lines, failed requests, retries, restarts, OOM kills, or dropped events.
+Across 27 Collector runs: 7,650,000 events planned = sent = accepted = found in storage, at exactly 895.0 bytes each, compressing **10.85 : 1**. Zero duplicates, corrupt lines, failed requests, retries, restarts, or OOM kills.
 
 ---
 
-## Part 1 — Collector
+## Collector
 
-A sidecar next to each Ray node. It receives events over HTTP, appends them to a local file, then periodically compresses that file, uploads it, and deletes the local copy.
+A sidecar that receives events, appends them to a local file, then periodically compresses, uploads, and deletes it. **CPU is paid per event; memory per byte still on disk.**
 
-That shape is the whole story: **CPU is paid per event; memory is paid per byte still on local disk.**
-
-### CPU tracks events per second
+### CPU
 
 [![Collector CPU vs event ingress](benchmark/charts/collector/slide17-collector-cpu-scaling.png)](benchmark/charts/collector/slide17-collector-cpu-scaling.png)
 
-| Events/s | Average CPU while ingesting | Range (3 runs) | p95 | Highest single interval |
+| Events/s | Ingest mean, median | Range (3 runs) | Interval p95 | Peak interval, median (range) |
 |---:|---:|---:|---:|---:|
-| 1,000 | 18.1 mCPU | 17.4 – 20.3 | 65.2 mCPU | 748 mCPU |
-| 5,000 | 105.9 mCPU | 104.2 – 107.3 | 134.1 mCPU | 1,110 mCPU |
+| 1,000 | 18.1 mCPU | 17.4 – 20.3 | 65.2 mCPU | 748 mCPU (695 – 890) |
+| 5,000 | 105.9 mCPU | 104.2 – 107.3 | 134.1 mCPU | 1,110 mCPU (1,109 – 1,116) |
 
-**The rule: ~20 mCPU per 1,000 events/s.** Across this campaign and the separate [head/worker campaign](#head-collector-vs-worker-collector), all seven measured points land between **18 and 24**.
+**~20 mCPU per 1,000 events/s** — all seven points across both campaigns fall between 18 and 24.
 
-**But do not size on the average.** The busiest interval hit **41× the average** at 1,000 events/s and 10× at 5,000. Those spikes are compress-and-upload, not ingest. Nothing throttled here because the limit was 2,000m — a limit set to "average plus a bit" would throttle the Collector exactly when it is trying to flush.
+**Do not size on the average.** Within a run, peak interval ÷ that run's mean was 37–49× at 1,000 events/s and ~10× at 5,000. Those peaks are compress-and-upload, not ingest.
 
-> The chart plots four rates; the published data carries detailed per-run CPU for 1,000 and 5,000 events/s.
+> Detailed per-run CPU is retained for 1,000 and 5,000 events/s; the chart's 2k and 3k points are chart-only.
 
-### Memory is disk cache, not the program
+### Memory
 
 [![Collector memory vs event ingress](benchmark/charts/collector/slide17-collector-memory-scaling.png)](benchmark/charts/collector/slide17-collector-memory-scaling.png)
 
-Container memory at exactly 30 s in — before any upload at any rate, so all four are compared at the same point in the cycle.
+At exactly 30 s in — before any upload at any rate.
 
-| Events/s | Container memory | Range (3 runs) | The program | Disk cache | Bytes on disk |
+| Events/s | Container | Range | Program | Disk cache | Bytes on disk |
 |---:|---:|---:|---:|---:|---:|
 | 1,000 | 58.3 MiB | 50.3 – 61.2 | 25.0 MiB | 25.6 MiB | 25.6 MiB |
 | 2,000 | 79.4 MiB | 79.3 – 82.7 | 21.3 MiB | 51.2 MiB | 51.2 MiB |
 | 3,000 | 105.7 MiB | 105.1 – 108.1 | 22.9 MiB | 76.7 MiB | 76.8 MiB |
 | 5,000 | 160.0 MiB | 159.7 – 164.0 | 24.5 MiB | 127.8 MiB | 127.8 MiB |
 
-Read the last three columns across, not down. **The program's own memory never grows** — 21 to 25 MiB whether it handles 1,000 or 5,000 events/s. Every extra MiB is cache, and cache tracks the disk file to within 0.1 MiB.
+Read across, not down. **The program does not grow with rate** — 21 to 25 MiB throughout. Every extra MiB is cache, tracking the disk file within 0.14 MiB.
 
-The container's memory number is answering a *storage* question, not a *software* one.
-
-| Events/s | Written in 90 s | Uploads (when) | Peak, median (range) | Memory at the end |
+| Events/s | Written in 90 s | Uploads | Peak, median (range) | At the end |
 |---:|---:|---|---:|---:|
-| 1,000 | 76.8 MiB | shutdown only, 105.7 s | 119.3 MiB (113.5 – 122.5) | 28.9 MiB |
+| 1,000 | 76.8 MiB | shutdown 105.7 s | 119.3 MiB (113.5 – 122.5) | 28.9 MiB |
 | 2,000 | 153.6 MiB | 72.9 s, shutdown 105.4 s | 171.9 MiB (171.2 – 175.3) | 27.0 MiB |
 | 3,000 | 230.5 MiB | 43.8 s, 103.8 s | 167.3 MiB (162.7 – 167.8) | 26.3 MiB |
 | 5,000 | 384.1 MiB | 44.1 s, 73.9 s, shutdown 105.7 s | 245.0 MiB (236.4 – 247.2) | 21.4 MiB |
 
-**Peak does not follow the rate.** 3,000 events/s peaked *lower* than 2,000 — it uploaded earlier, so less was sitting around. Size for the largest pile of un-uploaded data, not the rate.
+**Peak was not monotonic with rate.** 3,000 events/s peaked below 2,000 — it uploaded earlier, so less was resident. Size for the largest pile of un-uploaded data.
 
-**Watch the 1,000 events/s row.** 76.8 MiB was never enough to trigger an upload, so nothing left the Pod until shutdown. **A quiet node keeps the entire session on local disk until it stops.**
+At 1,000 events/s the 90-second run stayed under both rotation triggers (100 MiB, 5 minutes), so all 76.8 MiB was still local at shutdown. Every rate then settled back to 21–29 MiB. It was only ever cache.
 
-And the last column: every rate settled back to 21–29 MiB after the final upload. It was only ever cache.
+### Lifecycle
 
-### One 90-second run, second by second
-
-Same 5,000 events/s run in both charts: 10 s idle, 90 s of traffic, ~15 s idle, shutdown.
+Pointwise median across the three 5,000 events/s repeats: 10 s idle, 90 s traffic, ~15 s idle, shutdown.
 
 [![Collector CPU lifecycle at 5k events/s](benchmark/charts/collector/slide18-collector-cpu-lifecycle-5k.png)](benchmark/charts/collector/slide18-collector-cpu-lifecycle-5k.png)
 
-Flat band around 100 mCPU, far below the 2,000m limit. The jumps above it are the `Upload complete` markers.
-
 [![Collector memory lifecycle at 5k events/s](benchmark/charts/collector/slide18-collector-memory-lifecycle-5k.png)](benchmark/charts/collector/slide18-collector-memory-lifecycle-5k.png)
 
-A sawtooth: climb as data piles up, drop straight down when an upload finishes and the local file is deleted, climb again. Typical value and peak differ by more than 2×, **and only the peak can get you killed.**
+CPU holds a flat band near 100 mCPU. Memory is a sawtooth — climb, then drop the moment an upload completes and the local file is deleted. Typical and peak differ by more than 2×, **and only the peak can kill you.**
 
 ### How small can the memory limit go?
 
-Traffic held at 5,000 events/s; memory limit varied. 3 fresh Pods per limit.
+5,000 events/s, 3 fresh Pods per limit. Per-run medians.
 
-| Limit | Peak, median | Peak ÷ limit | Kernel reclaims | Time stalled | OOM kills | Result |
+| Limit | Peak, median | ÷ limit | Reclaims | PSI stall | OOM | Verdict |
 |---:|---:|---:|---:|---:|---:|---|
-| 192 Mi | 192.9 MiB | **1.005** | 3,255 | 51.3 ms | 0 | failed |
-| 256 Mi | 245.4 MiB | 0.959 | 0 | 0 | 0 | failed — headroom rule |
+| 192 Mi | 192.9 MiB | **1.005** | 1,084 | 16.5 ms | 0 | failed — pressure |
+| 256 Mi | 245.4 MiB | 0.959 | 0 | 0 | 0 | failed — headroom rule only |
 | 512 Mi | 239.8 MiB | **0.468** | 0 | 0 | 0 | **passed 3/3** |
 
-| Limit | The program | Disk cache | Kernel | Events/s achieved | Latency p99 |
+| Limit | Program | Disk cache | Kernel | Events/s | p99 |
 |---:|---:|---:|---:|---:|---:|
-| 192 Mi | 22.1 MiB | 164.9 MiB | 2.1 MiB | 4,999.9 | 44.3 ms |
-| 256 Mi | 26.4 MiB | 199.7 MiB | 6.5 MiB | 5,000.0 | 43.9 ms |
-| 512 Mi | 20.7 MiB | 197.2 MiB | 6.4 MiB | 4,999.9 | 44.4 ms |
+| 192 Mi | 22.1 MiB | 162.5 MiB | 2.9 MiB | 4,999.9 | 44.1 ms |
+| 256 Mi | 27.3 MiB | 199.7 MiB | 6.5 MiB | 5,000.0 | 43.9 ms |
+| 512 Mi | 20.7 MiB | 199.4 MiB | 6.5 MiB | 4,999.9 | 46.1 ms |
 
-**At 192 Mi the container did not die — it struggled quietly.** Peak pinned at the limit, 3,255 reclaims, 51.3 ms fully stalled — but **zero OOM kills**, still 4,999.9 events/s, still a 44.3 ms p99. *If your only alert is "did it get OOM-killed", this looks perfectly healthy.*
+**At 192 Mi it did not die — it struggled quietly.** Peak pinned at the limit, memory reclaimed 1,084 times, 16.5 ms stalled — but zero OOM kills, still 4,999.9 events/s at 44.1 ms p99. *If your only alert is OOM kills, this looks healthy.*
 
-**256 Mi showed no stress at all and still failed** — only because the test required peak ≤ 80% of the limit and 245.4 MiB is 95.9% of 256 MiB. That is a safety-margin *policy*, not an observed problem. Apply your own.
+**256 Mi showed no pressure at all** and failed only the campaign's "peak ≤ 80% of limit" rule (245.4 MiB is 95.9%). Policy, not an observed failure.
 
-**2.7× more memory did not give the program more memory.** From 192 Mi to 512 Mi the program went 22.1 → 20.7 MiB. All the extra room went to cache.
+**2.7× more memory gave the program nothing** — 22.1 → 20.7 MiB. The extra room went to cache. Selected: **512Mi**.
 
-Selected limit: **512Mi**.
+### Head vs Worker
 
-### Head Collector vs Worker Collector
-
-A separate campaign: 50,000 no-op tasks, both Collectors watched at once, five submission rates, 3 runs each.
+50,000 no-op tasks, both Collectors watched at once.
 
 [![Collector CPU lifecycle, head vs worker](benchmark/charts/collector/slide19-collector-head-worker-cpu-lifecycle.png)](benchmark/charts/collector/slide19-collector-head-worker-cpu-lifecycle.png)
 
 [![Collector memory lifecycle, head vs worker](benchmark/charts/collector/slide19-collector-head-worker-memory-lifecycle.png)](benchmark/charts/collector/slide19-collector-head-worker-memory-lifecycle.png)
 
-| Target tasks/s | Head ev/s | Worker ev/s | Head CPU | Worker CPU | mCPU per 1k ev/s | Head mem p95 | Worker mem p95 |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 250 | 510.2 | 525.7 | 12.3 m | 12.1 m | 23.6 | 109.0 MiB | 103.9 MiB |
-| 500 | 1,020.5 | 1,027.2 | 23.4 m | 22.3 m | 22.3 | 115.9 MiB | 108.0 MiB |
-| 1,000 | 2,088.7 | 2,012.7 | 46.4 m | 44.5 m | 22.2 | 112.4 MiB | 108.1 MiB |
-| 2,000 | 4,666.6 | 4,304.7 | 98.6 m | 94.0 m | 21.5 | 113.8 MiB | 112.2 MiB |
-| 3,000 | 4,895.9 | 4,750.9 | 103.8 m | 102.0 m | 21.3 | 118.1 MiB | 108.4 MiB |
+| Target tasks/s | Head ev/s | Worker ev/s | Head CPU | Worker CPU | mCPU/1k ev/s | Head mem p95 | Worker mem p95 | ev/s ÷ target |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 250 | 510.2 | 525.7 | 12.3 m | 12.1 m | 23.6 | 109.0 MiB | 103.9 MiB | 4.14 |
+| 500 | 1,020.5 | 1,027.2 | 23.4 m | 22.3 m | 22.3 | 115.9 MiB | 108.0 MiB | 4.10 |
+| 1,000 | 2,088.7 | 2,012.7 | 46.4 m | 44.5 m | 22.2 | 112.4 MiB | 108.1 MiB | 4.10 |
+| 2,000 | 4,666.6 | 4,304.7 | 98.6 m | 94.0 m | 21.5 | 113.8 MiB | 112.2 MiB | 4.49 |
+| 3,000 | 4,895.9 | 4,750.9 | 103.8 m | 102.0 m | 21.3 | 118.1 MiB | 108.4 MiB | 3.22 ⚠︎ |
 
-**The two roles cost the same** — within ~5% on both CPU and memory at every rate. **Size them the same.**
+⚠︎ the driver could not submit 3,000 tasks/s; its measured ceiling was 2,270.
 
-**Memory stays flat at ~110 MiB across a 12× range of rates.** Same story: cache, capped by the upload cycle.
+**Close enough to size the same** — CPU within 5.0%, memory within 9.0%. Memory stays flat near 110 MiB across a 12× range of rates.
 
-**The 3,000 row is not really 3,000** — the driver could not submit that fast. The same campaign measured 2,270 tasks/s as its real ceiling.
+**In the last half-second before shutdown both jumped to ~970 mCPU** to flush everything left on disk. A tight CPU limit makes that slower, not cheaper.
 
-**In the final half-second before shutdown, both Collectors jumped to ~970 mCPU** (Head 969m, Worker 974m) to compress and upload everything left on disk. A tight CPU limit does not make that cheaper — just slower.
-
-### How many events does one task produce?
-
-| Target tasks/s | Total events/s | Events per task |
-|---:|---:|---:|
-| 250 | 1,035.9 | 4.14 |
-| 500 | 2,047.7 | 4.10 |
-| 1,000 | 4,101.4 | 4.10 |
-| 2,000 | 8,971.3 | 4.49 |
-| 3,000 | 9,646.8 | 3.22 ⚠︎ driver-limited |
-
-**Roughly 4.1 – 4.5 events per task** on Ray 2.56 with do-nothing tasks. This bridges "tasks/s", which you can estimate, and "events/s", which is what costs money.
-
-It is also the least portable number here. Real tasks with logs and retries emit more. Use it for intuition, then size from your own busiest Collector's measured events/s.
+**Event ingress ÷ target task rate is ~4.1–4.5** on Ray 2.56 no-op tasks — the bridge between tasks/s, which you can estimate, and events/s, which is what costs money. Also the least portable number here.
 
 ---
 
-## Part 2 — History Server
+## History Server
 
-Loads a finished session out of object storage into memory, then answers questions about it. Both costs scale with one input: **tasks in the session someone opens.**
+Loads a finished session from object storage into memory, then answers queries. Both costs rise with tasks in the session.
 
-CPU request 1 / limit 2, memory request 1Gi / limit 12Gi, 5 fresh Pods per size.
+> The 12 GiB limit was measurement headroom, not a recommendation. Nothing here says what happens when it is squeezed.
 
-> **The 12 GiB limit is measurement headroom, not a recommendation.** It was set high so the curve could be measured without the kernel interfering. Nothing here says what happens when the History Server is squeezed.
-
-### Load time is a straight line
+### Load time
 
 [![History Server cold-load wall time vs tasks](benchmark/charts/history-server/slide20-history-server-cold-load-scaling.png)](benchmark/charts/history-server/slide20-history-server-cold-load-scaling.png)
 
-| Tasks | Load time, median | Range (5 runs) | Per task |
+| Tasks | Median | Range (5 runs) | Per task |
 |---:|---:|---:|---:|
 | 1,000 | 0.112 s | 0.109 – 0.122 | 112 µs |
 | 5,000 | 0.412 s | 0.402 – 0.441 | 82 µs |
 | 10,000 | 0.871 s | 0.837 – 0.893 | 87 µs |
 | 50,000 | 4.212 s | 4.157 – 4.329 | 84 µs |
 
-**`load time ≈ 84 µs × tasks`, R² = 0.9999.** No bend across a 50× range. Run-to-run variation tightens with size: 11% at 1,000 tasks, 4% at 50,000.
+**Fit: `17 ms + 84 µs × tasks`, R² = 0.9999.** No bend at the four sizes tested. Spread narrows with size: 11% at 1,000 tasks, 4% at 50,000.
 
-In practice: **a 50,000-task session takes about four seconds to open.** Someone is waiting. That is a page-load budget, not a capacity plan.
+**A 50,000-task session takes about four seconds to open.** Someone is waiting — that is a page-load budget, not a capacity plan.
 
-### Memory is a straight line too
+### Memory
 
 [![History Server memory peak vs tasks](benchmark/charts/history-server/slide20-history-server-memory-scaling.png)](benchmark/charts/history-server/slide20-history-server-memory-scaling.png)
 
@@ -225,17 +169,15 @@ In practice: **a 50,000-task session takes about four seconds to open.** Someone
 | 10,000 | 319.8 MiB | 293.5 – 402.6 | 32.7 KiB |
 | 50,000 | 1,367.6 MiB | 1,279.4 – 1,554.3 | 28.0 KiB |
 
-**`peak ≈ 27 KiB × tasks + 37 MiB`, R² = 0.9996.**
+**Fit: `37 MiB + 27 KiB × tasks`, R² = 0.9996.** Pulled by the big sessions — it overshoots 1,000 tasks by ~15 MiB, so treat it as a rule for 5,000 and up.
 
-Two warnings. The fit is pulled by the big sessions and overshoots 1,000 tasks by ~15 MiB — treat it as a rule for 5,000 and up. And peaks vary far more than load times: at 50,000 tasks the five runs spanned 1,279 – 1,554 MiB (20%), because a peak depends on when GC happens to run. **Size against the top of that range.**
+Peaks vary far more than load times: at 50,000 tasks the five runs spanned 1,279–1,554 MiB, a 20% spread. **Size against the top of the range.** Measurements stop at 50,000 tasks.
 
-Measurements stop at 50,000 tasks. Past that is arithmetic, not evidence.
-
-### One 50k session, second by second
+### Lifecycle
 
 [![History Server CPU lifecycle, 50k tasks](benchmark/charts/history-server/slide21-history-server-cpu-lifecycle.png)](benchmark/charts/history-server/slide21-history-server-cpu-lifecycle.png)
 
-| Phase | When | How long | CPU-seconds |
+| Phase | When | Duration | CPU-seconds |
 |---|---:|---:|---:|
 | Idle | 0.00 – 10.07 s | 10.07 s | — |
 | **Open the session** | 10.07 – 14.29 s | 4.23 s | **4.98** |
@@ -245,125 +187,73 @@ Measurements stop at 50,000 tasks. Past that is arithmetic, not evidence.
 | **Return 10,000 tasks** | 31.40 – 32.60 s | 1.20 s | **1.09** |
 | Idle | 32.60 – 40.61 s | 8.00 s | — |
 
-Three spikes separated by flat zero. **Idle by default, hard work briefly** — the opposite of the Collector's constant hum, and why the two want different limits.
-
-Opening the session used 4.98 CPU-seconds over 4.23 s: **about 1.2 cores**. It will use a second core if you give it one.
+Three spikes separated by flat zero. **Idle by default, hard work briefly** — the opposite of the Collector's constant hum, and why the two want different limits. Opening the session used **1.18 cores on average** and will use a second core if given one.
 
 [![History Server memory lifecycle, 50k tasks](benchmark/charts/history-server/slide21-history-server-memory-lifecycle.png)](benchmark/charts/history-server/slide21-history-server-memory-lifecycle.png)
 
-No sawtooth here. Memory rises once while the session opens and then **stays there** — peak 1,554 MiB, and still 1,385 MiB 26 seconds after loading finished.
+No sawtooth. Memory rises once while the session opens and **stays there** — peak 1,554 MiB, still 1,385 MiB 26 seconds after loading finished.
 
-**The Collector's memory is a buffer that drains. The History Server's is a working set that stays.** Once cached, a session occupies memory whether anyone looks at it or not.
-
-Note the 1 GiB request line: the container sat 35–50% above its own request. Requests schedule; they do not cap.
+**The Collector's memory drains. The History Server's is a working set that stays.** Against the 1 GiB request that is 35% above at the final sample and 52% at peak. Requests schedule; they do not cap.
 
 ---
 
-## Turning this into requests and limits
+## Requests and limits
 
-Derived from the measurements above as a **starting point**, not universal defaults. Policy choices are marked.
+A starting point derived from the above, not universal defaults.
 
-**Worker / Head Collector**
+**Collector** — CPU request `25m per 1,000 events/s` on your busiest sidecar (measured 18–24). Leave the CPU limit generous or off: upload and shutdown bursts reached 695–1,116 mCPU, so a small multiple of the request would throttle them. Memory limit **512Mi** at 5,000 events/s under the 80%-headroom rule; 256Mi showed no pressure and failed only that rule. Most of the footprint is droppable cache.
 
-| | Suggested | Why |
-|---|---|---|
-| CPU request | `25m per 1,000 events/s` on your busiest Collector | all seven points fell in 18 – 24; rounded up |
-| CPU limit | ≥ 10× the request, or none | spikes hit 748 – 1,110 mCPU on upload, ~970 mCPU at shutdown |
-| Memory limit | **512Mi** at 5,000 events/s | first limit that passed 3/3 — **measured** |
-| Memory request | comfortably below the limit | **policy** — most of the footprint is droppable cache |
+Scale memory by what can accumulate before rotation (100 MiB or 5 minutes) or shutdown.
 
-Scale the memory limit by how much can pile up between uploads — at low traffic that is *the whole session*, since the 1,000 events/s test never uploaded until shutdown.
+**History Server** — memory `37 MiB + 27 KiB × tasks` plus margin, for one loaded session. CPU: the tested profile averaged 1.18 cores opening a 50k session. Load-time budget `17 ms + 84 µs × tasks`.
 
-**History Server**
-
-| | Suggested | Why |
-|---|---|---|
-| Memory | `37 MiB + 27 KiB × tasks` per cached session, plus margin | R² = 0.9996; use the top of the range, ~1.55 GiB at 50k |
-| CPU | ≥ 1 core, 2 if load time matters to users | opening a session averaged 1.2 cores |
-| Load-time budget | `84 µs × tasks` | R² = 0.9999 |
-
-**Caveat.** These tests pinned `GOMAXPROCS=2` alongside a 2-CPU limit. In a container that derives its thread count from the CPU limit, changing the limit changes parallelism too — so a different CPU limit is a *different experiment*, not a point on these curves. **Re-measure load time if you deploy at a different CPU limit.**
-
----
+**Caveat.** These tests fixed CPU request 1, limit 2, and `GOMAXPROCS=2` together, so they do not separate quota from Go parallelism. A different CPU limit is a different experiment — re-measure.
 
 ## What this does not prove
 
-- **Head Collector endpoint polling was never in the memory-limit test.** 512Mi comes from the Worker-style workload.
-- **The History Server was never run under a tight memory limit.** Its 12 GiB was headroom.
-- **"4.1 – 4.5 events per task" is specific to Ray 2.56 and do-nothing tasks.** Intuition, not an input.
-- **The two campaigns are separate experiments**, on different days — not a joint measurement under one load.
-- **Head/worker lifecycle charts come from the earlier 50k-task campaign**, not the isolated one.
-- **Measurements stop at 5,000 events/s and 50,000 tasks.** Past that, the formulas are extrapolation.
-- **Raw output is not published.** ~58 MiB (Collector) and ~8.9 GiB (History Server) of logs, binaries, credentials and stored events stay out; the summarized evidence is in [`benchmark/data/`](benchmark/data).
+- Head Collector endpoint polling was not in the memory-limit sweep.
+- The History Server was never run under a tight memory limit, and only one cached session was measured — multi-session accumulation and eviction were not.
+- The 50k source used a different generation contract (paced 500 tasks/s) from the 1k/5k/10k sources, so the fits describe these four corpora rather than isolating task count.
+- "~4.1–4.5" divides observed events/s by the *configured* target task rate.
+- The two campaigns ran on different days; head/worker charts come from the earlier 50k-task campaign.
+- Measurements stop at 5,000 events/s and 50,000 tasks. Past that is extrapolation.
+- Raw campaign output is not published — logs, binaries, credentials, and stored events stay out.
 
-**Validation.** The Collector campaign passed its official validator (`SWEEP-VALID`), every file hash matches, all 206 data columns are documented, discrepancy count **0** — [`validation.json`](benchmark/data/collector/validation.json). Chart fingerprints are in [`chart-output-manifest.json`](benchmark/data/history-server/chart-output-manifest.json); all four match the published images.
+Validation: the Collector campaign passed its validator (`SWEEP-VALID`), all hashes match, discrepancy count **0** — [`validation.json`](benchmark/data/collector/validation.json). Chart fingerprints: [`chart-output-manifest.json`](benchmark/data/history-server/chart-output-manifest.json).
 
-<details>
-<summary><b>Slide-to-chart mapping</b> (16 and 22 are native slide shapes, no chart file)</summary>
+## Reproducing
 
-| Slide | Chart, under `benchmark/charts/` |
-|---|---|
-| 17 | `collector/slide17-collector-cpu-scaling.png` |
-| 17 | `collector/slide17-collector-memory-scaling.png` |
-| 18 | `collector/slide18-collector-cpu-lifecycle-5k.png` |
-| 18 | `collector/slide18-collector-memory-lifecycle-5k.png` |
-| 19 | `collector/slide19-collector-head-worker-cpu-lifecycle.png` |
-| 19 | `collector/slide19-collector-head-worker-memory-lifecycle.png` |
-| 20 | `history-server/slide20-history-server-cold-load-scaling.png` |
-| 20 | `history-server/slide20-history-server-memory-scaling.png` |
-| 21 | `history-server/slide21-history-server-cpu-lifecycle.png` |
-| 21 | `history-server/slide21-history-server-memory-lifecycle.png` |
+Prerequisites and full detail: **[`benchmark/harness/README.md`](benchmark/harness/README.md)**.
 
-</details>
-
----
-
-## Reproducing the campaigns
-
-Full prerequisites and every environment variable: **[`benchmark/harness/README.md`](benchmark/harness/README.md)**.
-
-You need a **dedicated** Kind cluster and kubectl context with the KubeRay operator running and the `collector` / `historyserver` images loaded. The runners refuse the wrong context, refuse to overwrite an output directory, and record the expected results and image IDs before any test runs. Never run two campaigns side by side.
-
-Copy a harness snapshot into `historyserver/test/benchmark` of a compatible KubeRay checkout, then:
+Use a dedicated `kind-bench` cluster with the `collector` / `historyserver` images loaded and **no** KubeRay operator already running — each runner builds and starts its own. The two harness snapshots are campaign-specific; install each as `historyserver/test/benchmark` in its own clean KubeRay checkout. Never run two campaigns side by side.
 
 ```bash
-# Collector: event-rate matrix
+# from benchmark/harness/collector/ — head/worker task-rate campaign
 ./sweeps/ray256_collector.sh
 
-# Collector: memory-limit sweep (192 / 256 / 512 Mi)
-BENCH_SWEEP_OUT=/absolute/path/to/out ./sweeps/ray256_collector_memory.sh
+# direct one-Collector event-rate matrix, lifecycle, and 192/256/512 Mi sweep
+BENCH_SWEEP_OUT=/abs/path/out ./sweeps/ray256_collector_memory.sh
+python3 ./sweeps/validate_collector_memory.py /abs/path/out --full   # expect SWEEP-VALID
 
-# History Server: one fixed source session per task count
-BENCH_HS_SOURCE_ACCEPTED_DIR=/absolute/path/to/accepted \
-BENCH_SWEEP_OUT=/absolute/path/to/out \
+# from benchmark/harness/history-server/ — isolated request protocol
+BENCH_HS_SOURCE_ACCEPTED_DIR=/abs/path/accepted \
+BENCH_SWEEP_OUT=/abs/path/hs-out \
   bash ./sweeps/ray256_hs_isolated.sh
-
-# Check the results
-python3 ./sweeps/validate_collector_memory.py <campaign-root> --full   # expect SWEEP-VALID
-python3 ./sweeps/validate_hs_sweep.py        <campaign-root>
+python3 ./sweeps/validate_hs_sweep.py /abs/path/hs-out --expected-kind hs-isolated-request
 ```
 
-The scripts in [`benchmark/renderers/`](benchmark/renderers) show which number each chart plots and how it was summarized. Personal paths were removed, but some still point at their original working directories, so they will **not** run without the raw campaign output.
+[`benchmark/renderers/`](benchmark/renderers) shows which metric each chart plots. Some still point at their original working directories and will not run without the raw campaign output.
 
----
-
-## Repository layout
+## Layout
 
 ```
 benchmark/
 ├── charts/       the 10 images used by slides 17–21
-├── data/         the numbers behind every chart
+├── data/         retained summaries behind the charts
 ├── renderers/    chart-drawing scripts (provenance; not standalone)
-└── harness/      the reproduce code
-    ├── README.md         how to run both campaigns
-    ├── collector/        test package as it was for the Collector campaign
-    └── history-server/   test package as it was for the History Server campaign
+└── harness/      reproduce code — one snapshot per campaign
 ```
 
-The two `harness/` folders are snapshots of the *same* test package, each from the checkout that produced that campaign. They overlap heavily but are kept separate, because merging them would blur which code produced which result.
-
 **charts** for the picture, **data** to check a number, **harness** to run it yourself.
-
----
 
 [Apache 2.0](LICENSE)
