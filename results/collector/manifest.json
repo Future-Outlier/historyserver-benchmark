@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "source": "/private/tmp/kuberay-collector-memory-formal-20260813-r7",
+  "files": {
+    "README.md": {
+      "bytes": 1561,
+      "sha256": "56de5cd98d2042452e93c130aec5775a3ca32fcf43b36be5e2c9d050243fe440"
+    },
+    "SUMMARY.md": {
+      "bytes": 3322,
+      "sha256": "d6e0e2e73b920fee36c4a6816c5927d465a149e87b0caaed36fcfda52deca2fa"
+    },
+    "a_lifecycle_quantiles.csv": {
+      "bytes": 234372,
+      "sha256": "0ab82545310285c993a98b40a9abda830edea5cec7314d02ad47a98ae7847d52"
+    },
+    "a_rate_summary.csv": {
+      "bytes": 1222,
+      "sha256": "f19a0e9a8c76d1e907d3a2db89f1ee9b3da71e8a4f3625f9b660991a6d43ac4e"
+    },
+    "a_uploads.csv": {
+      "bytes": 767,
+      "sha256": "3e63d0930e17ee12bd7e9375e8c925d20fd5c53d6398b670019c711615c3998e"
+    },
+    "b_idle_window_validator_medians.csv": {
+      "bytes": 1174,
+      "sha256": "c5311c8c395d4ad3570a32a0a430b099491f23c4472a9396f643a1fab6bd2dc8"
+    },
+    "b_lifecycle_quantiles.csv": {
+      "bytes": 131054,
+      "sha256": "4631be8fc70b4b3891a788938038bc443723a3790a118f12da6f8596ee274cf2"
+    },
+    "b_phase_composition.csv": {
+      "bytes": 4337,
+      "sha256": "21ddb31bf00ad3820089013474a23cd25d98e2bac08fa03914c383c3b7c31925"
+    },
+    "b_upload_reclaim_runs.csv": {
+      "bytes": 2599,
+      "sha256": "8a4266f8c9338b9753abb3943cf6ab7954e7dcc0906911596e1805102d9020be"
+    },
+    "b_upload_reclaim_summary.csv": {
+      "bytes": 9567,
+      "sha256": "80018d0bd40c3bbcdb77a34f9071de12a4ce537ba9821b3bdbb52307923a7b5f"
+    },
+    "build_bundle.py": {
+      "bytes": 60646,
+      "sha256": "e04e019c5263b088be5d241742e771eba15b8a306cfcaccb29d7c9df48b2bb4d"
+    },
+    "c_candidate_arms.csv": {
+      "bytes": 1406,
+      "sha256": "a433b1e1d2ef45d20a279b57ac06b9cd58ed825631bfc89c7570127efa613c0a"
+    },
+    "c_candidate_summary.csv": {
+      "bytes": 681,
+      "sha256": "c8f189b77c8cd4c9a7a1897550b1ce05f719cd14e23d9973cbf0f0b51ae0b2d3"
+    },
+    "column_definitions.csv": {
+      "bytes": 33312,
+      "sha256": "4d532fc45e7616869fa9089f66c4e22a846f68291b24bf97d749a4f54b111719"
+    },
+    "integrity_totals.csv": {
+      "bytes": 2983,
+      "sha256": "f1c8b240934f289ccf210d2ed5bd34ec77d5d422d4786b5eca098a4a652be676"
+    },
+    "results.json": {
+      "bytes": 50294,
+      "sha256": "f5f28b1349658ebe09fb7f243798fad33d63c35ae2a15cec24e6fc927b35f730"
+    },
+    "schema.json": {
+      "bytes": 5829,
+      "sha256": "28ef4f12e55235fe89db2ef807dd76e71b9daa0335b512537cb317d179eeda62"
+    },
+    "validation.json": {
+      "bytes": 574,
+      "sha256": "c35d536122a9ea6707593a16c2fb32cf3e9047f94919a18c89ec07e1b37d7f9d"
+    }
+  }
+}

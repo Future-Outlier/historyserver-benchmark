@@ -1,0 +1,162 @@
+{
+  "lifecycle": {
+    "arm": "isolated-r1",
+    "cgroupPath": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n50000/isolated-final/isolated-r1/20260812-185612/cgroup_samples.csv",
+    "lastCurrentMiB": 1385.2421875,
+    "lifetimePeakMiB": 1554.3203125,
+    "originTimeNano": 1786578975304054000,
+    "phaseBoundariesSeconds": [
+      0.0,
+      10.066221547,
+      14.292820966,
+      22.365086553,
+      23.32529922,
+      31.403658001,
+      32.602926169,
+      40.607771
+    ],
+    "phaseLabels": [
+      "Idle Baseline",
+      "Load Session",
+      "Idle",
+      "Count Tasks",
+      "Idle",
+      "Query Returns 10k Tasks",
+      "Tail"
+    ],
+    "reportPath": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n50000/isolated-final/isolated-r1/20260812-185612/bench-report.json",
+    "requestCPUSeconds": {
+      "cold": 4.979768,
+      "count": 0.964174,
+      "detail": 1.094563
+    },
+    "taskCount": 50000
+  },
+  "profile": {
+    "cpuLimit": "2",
+    "cpuRequest": "1",
+    "environment": "GOMAXPROCS=2,GODEBUG=gctrace=1",
+    "lifecycleArm": "isolated-r1",
+    "lifecycleTaskCount": 50000,
+    "memoryLimit": "12Gi",
+    "memoryRequest": "1Gi",
+    "protocol": "isolated-request-v1",
+    "queryConcurrency": 1,
+    "repeats": 5
+  },
+  "scaling": [
+    {
+      "campaignRoot": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n1000/isolated-final",
+      "coldWallSeconds": [
+        0.11123875,
+        0.121690083,
+        0.112171917,
+        0.11359075,
+        0.108966584
+      ],
+      "lifetimeMemoryPeakBytes": [
+        61874176,
+        50704384,
+        48480256,
+        51150848,
+        59969536
+      ],
+      "medianColdWallSeconds": 0.112171917,
+      "medianLifetimeMemoryPeakBytes": 51150848,
+      "medianLifetimeMemoryPeakMiB": 48.78125,
+      "reportPaths": [
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n1000/isolated-final/isolated-r1/20260812-183755/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n1000/isolated-final/isolated-r2/20260812-183908/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n1000/isolated-final/isolated-r3/20260812-184019/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n1000/isolated-final/isolated-r4/20260812-184131/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n1000/isolated-final/isolated-r5/20260812-184244/bench-report.json"
+      ],
+      "taskCount": 1000
+    },
+    {
+      "campaignRoot": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n5000/isolated-final",
+      "coldWallSeconds": [
+        0.402456791,
+        0.412720958,
+        0.440731084,
+        0.411638958,
+        0.409641333
+      ],
+      "lifetimeMemoryPeakBytes": [
+        202342400,
+        179761152,
+        187338752,
+        170704896,
+        179494912
+      ],
+      "medianColdWallSeconds": 0.411638958,
+      "medianLifetimeMemoryPeakBytes": 179761152,
+      "medianLifetimeMemoryPeakMiB": 171.43359375,
+      "reportPaths": [
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n5000/isolated-final/isolated-r1/20260812-184357/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n5000/isolated-final/isolated-r2/20260812-184510/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n5000/isolated-final/isolated-r3/20260812-184622/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n5000/isolated-final/isolated-r4/20260812-184734/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n5000/isolated-final/isolated-r5/20260812-184847/bench-report.json"
+      ],
+      "taskCount": 5000
+    },
+    {
+      "campaignRoot": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n10000/isolated-final",
+      "coldWallSeconds": [
+        0.874479291,
+        0.86125325,
+        0.871457083,
+        0.893468125,
+        0.836738917
+      ],
+      "lifetimeMemoryPeakBytes": [
+        352362496,
+        307720192,
+        422129664,
+        317452288,
+        335364096
+      ],
+      "medianColdWallSeconds": 0.871457083,
+      "medianLifetimeMemoryPeakBytes": 335364096,
+      "medianLifetimeMemoryPeakMiB": 319.828125,
+      "reportPaths": [
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n10000/isolated-final/isolated-r1/20260812-185002/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n10000/isolated-final/isolated-r2/20260812-185115/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n10000/isolated-final/isolated-r3/20260812-185228/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n10000/isolated-final/isolated-r4/20260812-185342/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n10000/isolated-final/isolated-r5/20260812-185456/bench-report.json"
+      ],
+      "taskCount": 10000
+    },
+    {
+      "campaignRoot": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n50000/isolated-final",
+      "coldWallSeconds": [
+        4.156819084,
+        4.211983709,
+        4.3015735,
+        4.329309958,
+        4.165191625
+      ],
+      "lifetimeMemoryPeakBytes": [
+        1629822976,
+        1434066944,
+        1513484288,
+        1341526016,
+        1432227840
+      ],
+      "medianColdWallSeconds": 4.211983709,
+      "medianLifetimeMemoryPeakBytes": 1434066944,
+      "medianLifetimeMemoryPeakMiB": 1367.6328125,
+      "reportPaths": [
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n50000/isolated-final/isolated-r1/20260812-185612/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n50000/isolated-final/isolated-r2/20260812-185734/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n50000/isolated-final/isolated-r3/20260812-185855/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n50000/isolated-final/isolated-r4/20260812-190016/bench-report.json",
+        "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n50000/isolated-final/isolated-r5/20260812-190138/bench-report.json"
+      ],
+      "taskCount": 50000
+    }
+  ],
+  "schemaVersion": 1
+}

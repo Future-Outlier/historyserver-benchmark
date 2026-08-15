@@ -1,0 +1,182 @@
+{
+  "source": "/private/tmp/kuberay-collector-memory-formal-20260813-r7",
+  "artifacts_sufficient": true,
+  "counter": "cgroup v2 cpu.stat usage_usec cumulative CPU microseconds",
+  "series_method": "delta cpu_usage_usec / delta wall time; interval rate assigned to a 0.25 s aligned grid; n=3 pointwise median/min/max",
+  "statistics_method": "per-run metrics first, then median/min/max across n=3",
+  "plotted_time_seconds": [
+    -10.0,
+    108.0
+  ],
+  "counter_series_time_seconds": [
+    -10.0,
+    105.25
+  ],
+  "evidence_boundary": "The last common CPU rate sample is 105.25 s. Final shutdown upload completion occurs later, so the chart marks it from logs but does not extrapolate CPU after the counter stops.",
+  "rates": {
+    "1000": {
+      "n": 3,
+      "raw_mib": 76.81846618652344,
+      "request_mcpu": 100.0,
+      "limit_mcpu": 2000.0,
+      "ingest_mean_mcpu": {
+        "median": 18.149028445051247,
+        "min": 17.416790797814453,
+        "max": 20.34192226225259,
+        "per_repeat": [
+          17.416790797814453,
+          20.34192226225259,
+          18.149028445051247
+        ]
+      },
+      "ingest_interval_p95_mcpu": {
+        "median": 65.17655446544778,
+        "min": 61.97030243547772,
+        "max": 70.64065620318596,
+        "per_repeat": [
+          61.97030243547772,
+          70.64065620318596,
+          65.17655446544778
+        ]
+      },
+      "lifecycle_interval_peak_mcpu": {
+        "median": 747.9028232918242,
+        "min": 695.2234970146027,
+        "max": 890.3212315833514,
+        "per_repeat": [
+          695.2234970146027,
+          747.9028232918242,
+          890.3212315833514
+        ]
+      },
+      "uploads": [
+        {
+          "ordinal": 1,
+          "median_s": 105.685126167,
+          "min_s": 105.641751508,
+          "max_s": 105.721495508,
+          "per_repeat_s": [
+            105.641751508,
+            105.685126167,
+            105.721495508
+          ]
+        }
+      ],
+      "nr_throttled_delta_total": 0,
+      "throttled_usec_delta_total": 0,
+      "first_sample_s_range": [
+        -23.740427788,
+        -22.735599239
+      ],
+      "last_sample_s_range": [
+        105.460124132,
+        105.588379675
+      ],
+      "phase_complete_s_range": [
+        106.331257,
+        107.384817
+      ]
+    },
+    "5000": {
+      "n": 3,
+      "raw_mib": 384.0923309326172,
+      "request_mcpu": 100.0,
+      "limit_mcpu": 2000.0,
+      "ingest_mean_mcpu": {
+        "median": 105.87933282750123,
+        "min": 104.16450576063954,
+        "max": 107.34043618397885,
+        "per_repeat": [
+          104.16450576063954,
+          105.87933282750123,
+          107.34043618397885
+        ]
+      },
+      "ingest_interval_p95_mcpu": {
+        "median": 134.14155015399373,
+        "min": 129.3901808962187,
+        "max": 134.70877753318783,
+        "per_repeat": [
+          129.3901808962187,
+          134.70877753318783,
+          134.14155015399373
+        ]
+      },
+      "lifecycle_interval_peak_mcpu": {
+        "median": 1109.6631156318776,
+        "min": 1108.8832567140591,
+        "max": 1116.1880180116555,
+        "per_repeat": [
+          1108.8832567140591,
+          1109.6631156318776,
+          1116.1880180116555
+        ]
+      },
+      "uploads": [
+        {
+          "ordinal": 1,
+          "median_s": 44.17032763,
+          "min_s": 42.118435211,
+          "max_s": 44.221626167,
+          "per_repeat_s": [
+            44.17032763,
+            42.118435211,
+            44.221626167
+          ]
+        },
+        {
+          "ordinal": 2,
+          "median_s": 73.881422334,
+          "min_s": 71.889903169,
+          "max_s": 73.90011838,
+          "per_repeat_s": [
+            73.90011838,
+            71.889903169,
+            73.881422334
+          ]
+        },
+        {
+          "ordinal": 3,
+          "median_s": 105.719522838,
+          "min_s": 105.631763756,
+          "max_s": 105.71996171,
+          "per_repeat_s": [
+            105.631763756,
+            105.719522838,
+            105.71996171
+          ]
+        }
+      ],
+      "nr_throttled_delta_total": 0,
+      "throttled_usec_delta_total": 0,
+      "first_sample_s_range": [
+        -23.721835042,
+        -21.720293956
+      ],
+      "last_sample_s_range": [
+        105.534461256,
+        105.67155896
+      ],
+      "phase_complete_s_range": [
+        106.317452,
+        107.392901
+      ]
+    }
+  },
+  "qa": {
+    "run_count": 6,
+    "all_usage_counters_monotonic": true,
+    "all_cover_baseline_to_shutdown_onset": true,
+    "all_have_expected_upload_timeline": true,
+    "all_cpu_requests_100m": true,
+    "all_cpu_limits_2000m": true,
+    "no_throttling_observed": true,
+    "png_nonempty": true,
+    "svg_nonempty": true,
+    "all_checks_pass": true
+  },
+  "outputs": {
+    "png": "/private/tmp/ray-summit-collector-results-r7/charts/07-a-cpu-lifecycle-1k-vs-5k.png",
+    "svg": "/private/tmp/ray-summit-collector-results-r7/charts/07-a-cpu-lifecycle-1k-vs-5k.svg"
+  }
+}

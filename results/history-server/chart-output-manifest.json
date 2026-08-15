@@ -1,0 +1,40 @@
+{
+  "files": [
+    {
+      "height": 900,
+      "path": "/private/tmp/ray-summit-isolated-20260812/final-charts/slide17-cold-load-scaling.png",
+      "sha256": "b7f06ed15e245b22011f120126c37cf0dd6e01d459c17df65cd3c753a1caf571",
+      "width": 1200
+    },
+    {
+      "height": 900,
+      "path": "/private/tmp/ray-summit-isolated-20260812/final-charts/slide17-memory-scaling.png",
+      "sha256": "5e2881d45ac5c9c5642b8dc1d36bf713059fa725f43be5f9974525448efd7bc4",
+      "width": 1200
+    },
+    {
+      "height": 520,
+      "path": "/private/tmp/ray-summit-isolated-20260812/final-charts/slide18-cpu-lifecycle.png",
+      "sha256": "6e063fa2a9a4764c63726c328e4a003823c15c6b43220d1b15fb2a1fee297421",
+      "width": 2400
+    },
+    {
+      "height": 520,
+      "path": "/private/tmp/ray-summit-isolated-20260812/final-charts/slide18-memory-lifecycle.png",
+      "sha256": "4627f999f326122b982fc1744b46134e9d358faafcf218e078391ed256da32c1",
+      "width": 2400
+    },
+    {
+      "height": 1940,
+      "path": "/private/tmp/ray-summit-isolated-20260812/final-charts/qa-contact-sheet.png",
+      "sha256": "dbd8b30ecca91da7cf0fcc8937aabb3179a241e144be0ad4f3b8d48e3f11b81d",
+      "width": 2400
+    },
+    {
+      "path": "/private/tmp/ray-summit-isolated-20260812/final-charts/chart-data.json",
+      "sha256": "e9d1d03d05b091ed51e58b08163d9c6cde42ee6f4d45732cba43678ed3a9f798"
+    }
+  ],
+  "schemaVersion": 1,
+  "status": "formal-data-rendered"
+}

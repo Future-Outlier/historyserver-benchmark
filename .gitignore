@@ -1,6 +1,10 @@
-out/
-kubeconfig*
-*.kubeconfig
-kuberay-operator
-operator.log
-.DS_Store
+**/__pycache__/
+**/*.py[cod]
+**/out/
+*.log
+*.b64
+*.pdf
+*kubeconfig*
+*operator
+*contact-sheet*
+*.pre-font-enlarge.*

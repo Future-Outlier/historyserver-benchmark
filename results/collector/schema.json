@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "source": "/private/tmp/kuberay-collector-memory-formal-20260813-r7",
+  "common_definitions": {
+    "MiB": "bytes / 1,048,576 (2^20)",
+    "time_weighted_percentile": "Treat each cgroup/spool sample as piecewise-constant until the next sample, clip each interval to the named phase, pool interval durations across n=3, then take the weighted percentile.",
+    "cross_run_lifecycle_quantile": "Align each run at its measured ingest phase start, linearly interpolate each raw series onto a 0.5-second real-time grid, then calculate q0/q25/q50/q75/q100 across n=3 at each grid point.",
+    "dense_sample_time": "Cgroup/spool samples retain raw kind-node unixNano and are differenced against host phase timestamps, matching the formal validator and published percentile contract. Clock probes measured the node about 20ms ahead; this uncertainty is below the 250ms sample cadence and is not silently removed.",
+    "lifetime_peak": "Exact final in-process cgroup-v2 memory.peak; median/min/max are across n=3. This is not max(memory.current median trajectory).",
+    "upload_time": "Collector log upload-completion unixNano converted from node to host clock using linear interpolation of measured node-minus-host skewNano between bracketing probes; reported relative to measured phase boundaries.",
+    "upload_bytes": "Raw rotated JSONL file size (rotationTask.size), not gzip object bytes."
+  },
+  "files": {
+    "a_rate_summary.csv": {
+      "row": "one target event rate; n=3 independent A arms",
+      "aggregation": "time-weighted ingest percentiles plus cross-run min/median/max exact final values",
+      "units": "rate=events/s; memory=MiB; raw_jsonl=MiB"
+    },
+    "a_lifecycle_quantiles.csv": {
+      "row": "one target rate and one 0.5-second grid point",
+      "aggregation": "Align each run at its measured ingest phase start, linearly interpolate each raw series onto a 0.5-second real-time grid, then calculate q0/q25/q50/q75/q100 across n=3 at each grid point.",
+      "units": "time=seconds relative to ingest; memory=MiB"
+    },
+    "a_uploads.csv": {
+      "row": "one upload ordinal at one A target rate, summarized across n=3",
+      "aggregation": "min/median/max across corresponding ordinal in n=3",
+      "units": "time=seconds relative to ingest; size=raw JSONL MiB"
+    },
+    "b_phase_composition.csv": {
+      "row": "one B target rate, phase window, source, and memory/spool metric",
+      "aggregation": "Treat each cgroup/spool sample as piecewise-constant until the next sample, clip each interval to the named phase, pool interval durations across n=3, then take the weighted percentile.",
+      "units": "MiB"
+    },
+    "b_lifecycle_quantiles.csv": {
+      "row": "one B target rate and one 0.5-second grid point",
+      "aggregation": "Align each run at its measured ingest phase start, linearly interpolate each raw series onto a 0.5-second real-time grid, then calculate q0/q25/q50/q75/q100 across n=3 at each grid point.",
+      "units": "time=seconds relative to ingest; memory/spool=MiB"
+    },
+    "b_upload_reclaim_runs.csv": {
+      "row": "one B arm",
+      "aggregation": "exact per-run event times and linearly interpolated cgroup composition 1 second before/after first observed zero-spool reclaim",
+      "units": "time=seconds relative to ingest/idle; memory=MiB"
+    },
+    "b_upload_reclaim_summary.csv": {
+      "row": "one B target rate and one lifecycle metric",
+      "aggregation": "min/median/max across n=3 independent B arms; null runs excluded",
+      "units": "stated per row"
+    },
+    "b_idle_window_validator_medians.csv": {
+      "row": "one B target rate, one final-idle 30-second window, and one cgroup metric",
+      "aggregation": "unweighted raw-sample median per arm exactly matching validator median_window(), plus median of the three arm medians",
+      "units": "MiB"
+    },
+    "c_candidate_arms.csv": {
+      "row": "one C arm",
+      "aggregation": "exact final cgroup counters and candidate-evaluator adjacent sampled composition",
+      "units": "memory=MiB; ratio=fraction; PSI=microseconds; latency=milliseconds"
+    },
+    "c_candidate_summary.csv": {
+      "row": "one tested memory limit; n=3",
+      "aggregation": "cross-run min/median/max, sums for counters, and exact validator verdict",
+      "units": "memory=MiB; ratio/spread=fraction; PSI=microseconds"
+    },
+    "integrity_totals.csv": {
+      "row": "one campaign total or recomputed invariant",
+      "aggregation": "sum/distinct/equality across all 27 arms, stated per row",
+      "units": "stated per row"
+    },
+    "column_definitions.csv": {
+      "row": "one data CSV column",
+      "aggregation": "exact data dictionary; no measurement aggregation",
+      "units": "definition supplies the data-column unit"
+    },
+    "results.json": {
+      "row": "nested campaign summary plus discrepancy list; dense lifecycle grids remain in CSV",
+      "aggregation": "same definitions as CSV files",
+      "units": "field suffix and this schema"
+    }
+  },
+  "field_conventions": {
+    "p50/p95/p99": "time-weighted percentile when used in A rate or B phase summaries",
+    "q0/q25/q50/q75/q100": "cross-run lifecycle quantile at a fixed aligned time",
+    "min/median/max": "across n=3 independent arms",
+    "events_max": "final absolute memory.events max counter; baseline was zero in these fresh cgroups, so it is also the campaign-arm delta",
+    "psi_full_total_usec": "final absolute cgroup memory.pressure full total counter; baseline was zero in these fresh cgroups, so it is also the campaign-arm delta",
+    "peak_to_limit_ratio": "exact final memory.peak bytes divided by configured memory.max bytes",
+    "reclaim_zero": "first valid event-spool sample at or after runtime upload completion where raw+gzip+tmp event-file bytes equal zero"
+  }
+}

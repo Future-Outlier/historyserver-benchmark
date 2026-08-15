@@ -1,0 +1,34 @@
+{
+  "paths": [
+    "/private/tmp/ray-summit-final-20260809/assets/collector-cpu-scaling-side.png",
+    "/private/tmp/ray-summit-final-20260809/assets/collector-memory-scaling-side.png",
+    "/private/tmp/ray-summit-final-20260809/assets/collector-cpu-lifecycle-wide.png",
+    "/private/tmp/ray-summit-final-20260809/assets/collector-memory-lifecycle-wide.png"
+  ],
+  "scaling": {
+    "Head": [
+      {"target": 250.0, "events": 510.1666666666667, "cpu_m": 12.310585008139858, "memory_mib": 108.98958333333333},
+      {"target": 500.0, "events": 1020.5, "cpu_m": 23.41573027547022, "memory_mib": 115.90494791666667},
+      {"target": 1000.0, "events": 2088.7333333333336, "cpu_m": 46.417879446398736, "memory_mib": 112.37890625},
+      {"target": 2000.0, "events": 4666.599999999999, "cpu_m": 98.62397485367184, "memory_mib": 113.77864583333333},
+      {"target": 3000.0, "events": 4895.933333333333, "cpu_m": 103.84455707039957, "memory_mib": 118.12760416666667}
+    ],
+    "Worker": [
+      {"target": 250.0, "events": 525.6999999999999, "cpu_m": 12.07947054909201, "memory_mib": 103.89453125},
+      {"target": 500.0, "events": 1027.2, "cpu_m": 22.307762282998638, "memory_mib": 107.98177083333333},
+      {"target": 1000.0, "events": 2012.7, "cpu_m": 44.509336527785486, "memory_mib": 108.14713541666667},
+      {"target": 2000.0, "events": 4304.7, "cpu_m": 94.04892869862284, "memory_mib": 112.23307291666667},
+      {"target": 3000.0, "events": 4750.900000000001, "cpu_m": 101.96577308208275, "memory_mib": 108.37630208333333}
+    ]
+  },
+  "lifecycle": {
+    "pod_stop_s": 90.863058474,
+    "driver_rate": 2270.2,
+    "final_cpu": {
+      "Head": {"interval_s": 0.518555333, "mCPU": 969.495380736929},
+      "Worker": {"interval_s": 0.518555333, "mCPU": 973.8632849042552}
+    },
+    "memory_current_p95_mib": {"Head": 114.58984375, "Worker": 106.390625},
+    "final_memory_current_mib": {"Head": 119.02734375, "Worker": 117.484375}
+  }
+}

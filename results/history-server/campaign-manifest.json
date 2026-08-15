@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "validator": "/private/tmp/kuberay-hs-pr4960-rebench/historyserver/test/benchmark/sweeps/validate_hs_sweep.py",
+  "campaigns": {
+    "1000": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n1000/isolated-final",
+    "5000": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n5000/isolated-final",
+    "10000": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n10000/isolated-final",
+    "50000": "/private/tmp/kuberay-hs-isolated-20260812-r1-5hxzlt/n50000/isolated-final"
+  },
+  "profile": {
+    "cpuRequest": "1",
+    "cpuLimit": "2",
+    "memoryRequest": "1Gi",
+    "memoryLimit": "12Gi",
+    "protocol": "isolated-request-v1",
+    "queryConcurrency": 1,
+    "environment": "GOMAXPROCS=2,GODEBUG=gctrace=1",
+    "repeats": 5,
+    "lifecycleTaskCount": 50000,
+    "lifecycleArm": "isolated-r1"
+  }
+}

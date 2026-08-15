@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "source": "/private/tmp/kuberay-collector-memory-formal-20260813-r7",
+  "official_validator": {
+    "command": "python3 test/benchmark/sweeps/validate_collector_memory.py <r7-root> --full",
+    "result": "SWEEP-VALID"
+  },
+  "bundle_validation": {
+    "manifest_hashes_match": true,
+    "all_csv_rows_match_header_width": true,
+    "all_data_csv_columns_documented": true,
+    "documented_data_csv_columns": 206,
+    "results_json_parses": true,
+    "generated_reports": 27,
+    "all_integrity_checks_pass": true,
+    "discrepancy_count": 0
+  }
+}
